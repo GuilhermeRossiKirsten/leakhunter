@@ -282,6 +282,19 @@ if(LEAKHUNTER_BUILD_AGENT AND LEAKHUNTER_BUILD_EXAMPLES)
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/integration/run_naming.cmake")
     set_tests_properties(integration_report_naming PROPERTIES LABELS "integration" TIMEOUT 60)
 
+    # The negative control at demonstration scale: ~12000 allocations through
+    # unique_ptr with a custom deleter, a shared_ptr graph with weak_ptr back
+    # references, exceptions unwound by RAII, and a pmr arena -- all of it clean.
+    # A false positive here matters more than a missed leak anywhere else.
+    if(TARGET clean_app)
+        leakhunter_add_integration_test(integration_poc5_clean clean_app
+            EXPECT "EXPECT_LEAK_COUNT=0"
+                   "EXPECT_LEAKED_BYTES=0"
+                   "EXPECT_MISMATCHES=0"
+                   "EXPECT_NO_SNIPPETS=1"
+                   "EXPECT_EXIT=0")
+    endif()
+
     # A target killed mid-run never runs the agent's destructor. Without the
     # fatal-signal flush the entire buffered trace is lost, so this guards the
     # case a leak hunter is most often reached for.

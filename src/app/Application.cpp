@@ -406,6 +406,25 @@ void Application::Impl::printSummary(const analysis::LeakReport& report,
     out_ << "\n";
     out_ << "  LeakHunter summary\n";
     out_ << "  ------------------------------------------------------------\n";
+
+    // A one-line answer before the numbers. Someone scanning output wants to
+    // know whether this run passed; making them derive it from four zeros is
+    // work the tool should have done for them.
+    if (report.clean()) {
+        out_ << "  verdict                   PASSED  (no leaks, no mismatched frees)\n";
+    } else {
+        std::string why;
+        if (report.leakCount > 0) {
+            why = fmt::format("{} leak(s)", report.leakCount);
+        }
+        if (stats.mismatchedFrees > 0) {
+            why += why.empty() ? "" : ", ";
+            why += fmt::format("{} mismatched free(s)", stats.mismatchedFrees);
+        }
+        out_ << fmt::format("  verdict                   FAILED  ({})\n", why);
+    }
+    out_ << "\n";
+
     out_ << fmt::format("  total allocations   {:>12}  ({})\n", stats.totalAllocations,
                         formatBytes(stats.totalBytesAllocated));
     out_ << fmt::format("  total freed         {:>12}  ({})\n", stats.totalDeallocations,

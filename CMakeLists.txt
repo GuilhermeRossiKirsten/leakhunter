@@ -60,6 +60,7 @@ if(LEAKHUNTER_BUILD_POC)
     add_subdirectory(poc2)
     add_subdirectory(poc3)
     add_subdirectory(poc4)
+    add_subdirectory(poc5)
 endif()
 
 if(LEAKHUNTER_BUILD_TESTS)

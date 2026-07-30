@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 #
-# Build LeakHunter, build all four demonstrations, run each under the tool, and
+# Build LeakHunter, build all five demonstrations, run each under the tool, and
 # leave one timestamped report per binary.
 #
 #   ./scripts/run_all_pocs.sh [output-dir]
 #
 # Default output: build/all-poc-reports/
 #
-# The four are deliberately unalike, and together they cover most of what the
-# tool has to handle:
+# The five are deliberately unalike, and together they cover most of what the
+# tool has to handle -- four planted defects and one control that must come
+# back clean:
 #
 #   docindex     four planted defects in a realistic multi-file program
 #   service      never exits on its own -- the script stops it, as you would
 #   pipeline23   C++23, std::expected error path
 #   pipeline98   the same program in C++98
+#   clean_app    the negative control -- modern C++, no defect, must pass
 #
 # Each poc is configured and built **standalone**, the way you would build any
 # other project. That is part of the point: nothing here links against
@@ -44,7 +46,7 @@ cmake --build "$build" -j"$jobs" > /dev/null
 note "$("$leakhunter" --version)"
 
 # ---------------------------------------------------------------------------
-# 2. The four demonstrations, each configured and built on its own
+# 2. The five demonstrations, each configured and built on its own
 # ---------------------------------------------------------------------------
 declare -a built_names=()
 declare -a built_paths=()
@@ -86,6 +88,7 @@ build_poc poc  docindex
 build_poc poc2 service
 build_poc poc3 pipeline23
 build_poc poc4 pipeline98
+build_poc poc5 clean_app
 
 if [[ ${#built_paths[@]} -eq 0 ]]; then
     echo "nothing was built; stopping" >&2
@@ -164,6 +167,23 @@ PY
 fi
 
 printf '\n'
+# clean_app is the one that must come back clean. If it ever does not, the tool
+# has a false positive, which matters more than any of the planted defects.
+for index in "${!built_names[@]}"; do
+    [[ "${built_names[$index]}" == "clean_app" ]] || continue
+
+    banner "negative control"
+    if [[ "${exit_codes[$index]}" -ne 0 ]]; then
+        echo "   clean_app came back dirty. That is a FALSE POSITIVE, and it matters" >&2
+        echo "   more than any of the planted defects: a leak detector that fires on" >&2
+        echo "   clean code is one people switch off." >&2
+        exit 2
+    fi
+    note "clean_app PASSED -- 0 leaks, 0 mismatched frees, exit 0"
+    note "~12000 allocations through unique_ptr, shared_ptr/weak_ptr, RAII"
+    note "unwinding and a pmr arena, and none of it reported."
+done
+
 echo "   Every file is kept. Run this again and you get a second set beside the"
 echo "   first -- the names carry the target and the local timestamp, so nothing"
 echo "   is overwritten."
@@ -171,7 +191,9 @@ printf '\n'
 echo "   Open any of them:  xdg-open $reports/<name>.html"
 printf '\n'
 
-# Exit non-zero if any run found something, so this is usable as a gate.
+# Exit non-zero if any run found something, so this is usable as a gate. The
+# four planted demos are expected to fail; that is what they are for, and
+# clean_app is checked separately above.
 for status in "${exit_codes[@]}"; do
     if [[ "$status" -ne 0 ]]; then
         exit 1

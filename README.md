@@ -16,7 +16,7 @@ reports blocks released through the wrong entry point (`new[]` freed with `delet
 already has the evidence and the check costs nothing.
 
 **Everything at once:** [`./scripts/run_all_pocs.sh`](scripts/run_all_pocs.sh) builds LeakHunter,
-builds all four demonstrations standalone, runs each under the tool, and leaves one timestamped
+builds all five demonstrations standalone, runs each under the tool, and leaves one timestamped
 report per binary.
 
 **Try it in one command:** [`./poc2/run_demo.sh`](poc2/) starts a service that leaks on every tick,
@@ -262,6 +262,7 @@ These are deliberate, and documented rather than hidden:
 | [poc/](poc/) | **Start here.** A working program with four planted defects, and what LeakHunter says about it |
 | [poc2/](poc2/) | A long-running service: stop it with Ctrl-C and still get the report |
 | [poc3/](poc3/) & [poc4/](poc4/) | The same program in **C++23** and **C++98** — identical findings, because interception happens below the language |
+| [poc5/](poc5/) | **The negative control.** 12,000 allocations through smart pointers, RAII unwinding and a pmr arena — reported clean |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Modules, diagrams, execution flow, design rationale |
 | [USAGE.md](docs/USAGE.md) | Complete CLI reference and recipes |
 | [REPORT_FORMAT.md](docs/REPORT_FORMAT.md) | JSON schema |

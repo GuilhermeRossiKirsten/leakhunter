@@ -320,7 +320,7 @@ std::string HtmlReportGenerator::render(const analysis::LeakReport& report) {
     // Three outcomes, not two: a run can leak nothing and still be wrong.
     std::string verdict;
     if (report.clean()) {
-        verdict = R"(<span class="verdict good">No leaks detected</span>)";
+        verdict = R"(<span class="verdict good">PASSED &mdash; no leaks, no mismatched frees</span>)";
     } else if (report.leakCount > 0) {
         verdict = fmt::format(R"(<span class="verdict bad">{} leak{} &mdash; {} lost</span>)",
                               report.leakCount, report.leakCount == 1 ? "" : "s",

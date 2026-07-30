@@ -175,7 +175,10 @@ LH_TEST(HtmlReport, a_clean_run_says_so) {
     report.targetCommand = "./clean";
 
     const std::string html = HtmlReportGenerator::render(report);
-    LH_CHECK(html.find("No leaks detected") != std::string::npos);
+    // The verdict has to be an answer, not a statistic: someone opening this
+    // wants to know whether the run passed.
+    LH_CHECK(html.find("PASSED") != std::string::npos);
+    LH_CHECK(html.find("verdict good") != std::string::npos);
 }
 
 LH_TEST(JsonReport, malformed_utf8_does_not_destroy_the_report) {

@@ -569,6 +569,7 @@ LeakHunter/
 ├── poc/                        # docindex: a realistic demo with four planted defects
 ├── poc2/                       # service: a long-running target you stop by hand
 ├── poc3/ poc4/                 # the same program in C++23 and C++98, side by side
+├── poc5/                       # clean_app: the negative control, must report nothing
 ├── scripts/run_all_pocs.sh     # build everything, run everything, keep every report
 └── docs/
 ```
