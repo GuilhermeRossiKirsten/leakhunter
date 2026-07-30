@@ -652,22 +652,40 @@ void Application::Impl::printSummary(const analysis::LeakReport& report,
     printMemoryProfile(report);
     printHotSpots(report);
 
-    if (!report.mismatchedFrees.empty()) {
+    if (!report.mismatchGroups.empty()) {
         out_ << "  mismatched frees\n";
-        const std::size_t shown = std::min<std::size_t>(report.mismatchedFrees.size(), 3);
+        const std::size_t shown = std::min<std::size_t>(report.mismatchGroups.size(), 3);
         for (std::size_t i = 0; i < shown; ++i) {
-            const MismatchedFree& mismatch = report.mismatchedFrees[i];
-            const StackFrame* frame = mismatch.responsible();
-            out_ << fmt::format("    {} allocated with {}, released with {}\n",
-                                formatBytes(mismatch.size),
-                                toSourceSpelling(mismatch.allocatedBy),
-                                toSourceSpelling(mismatch.releasedBy));
+            const analysis::MismatchGroup& group = report.mismatchGroups[i];
+            const StackFrame* frame = group.blamedFrame < group.representativeTrace.size()
+                                          ? &group.representativeTrace[group.blamedFrame]
+                                          : nullptr;
+
+            out_ << fmt::format("    {} x{}  allocated with {}, released with {}\n",
+                                formatBytes(group.totalBytes), group.count,
+                                toSourceSpelling(group.allocatedBy),
+                                toSourceSpelling(group.releasedBy));
             out_ << fmt::format("                        allocated at {}\n",
                                 frame != nullptr ? frame->describe() : "<unknown>");
+
+            // The line that answers "did this run N times, or was it reported N
+            // times?". The addresses match because the block was freed and
+            // handed straight back, which is the allocator behaving well and
+            // looks exactly like duplicate reporting.
+            if (group.recycledSameBlock()) {
+                out_ << fmt::format(
+                    "                        the same block reused across all {} -- one line in a "
+                    "loop, not {} sites\n",
+                    group.count, group.count);
+            }
         }
-        if (report.mismatchedFrees.size() > shown) {
-            out_ << fmt::format("    ... and {} more (see the report)\n",
-                                report.mismatchedFrees.size() - shown);
+        if (report.mismatchGroups.size() > shown) {
+            out_ << fmt::format("    ... and {} more site(s) (see the report)\n",
+                                report.mismatchGroups.size() - shown);
+        }
+        if (report.mismatchGroupsArePartial) {
+            out_ << "                        (more occurred than were listed; these counts are a "
+                    "sample)\n";
         }
         out_ << "\n";
     }

@@ -749,3 +749,195 @@ LH_TEST(HotSpots, one_spot_can_hold_both_its_own_bytes_and_the_runtimes) {
     LH_CHECK_EQ(spot.liveBytes, std::uint64_t{2048});          // main's, and red
     LH_CHECK_EQ(spot.runtimeLiveBytes, std::uint64_t{4096});   // libc's, and not
 }
+
+// --- mismatch grouping ----------------------------------------------------
+//
+// Written because a reader looked at a report of eight identical-looking cards
+// and had to ask whether the code ran eight times or was reported eight times.
+// The tool held the answer -- eight timestamps, one address -- and said nothing.
+
+namespace {
+
+using leakhunter::ReleaseKind;
+
+leakhunter::MismatchedFree mismatchAt(std::vector<std::uint64_t> callStack,
+                                      std::uint64_t address, std::uint64_t timestampNs,
+                                      AllocationKind allocatedBy = AllocationKind::NewArray,
+                                      ReleaseKind releasedBy = ReleaseKind::Free,
+                                      std::uint64_t thread = 1) {
+    leakhunter::MismatchedFree mismatch;
+    mismatch.address = address;
+    mismatch.size = 512;
+    mismatch.timestampNs = timestampNs;
+    mismatch.allocatedBy = allocatedBy;
+    mismatch.releasedBy = releasedBy;
+    mismatch.allocatedOnThread = thread;
+    mismatch.releasedOnThread = thread;
+    mismatch.callStack = std::move(callStack);
+    return mismatch;
+}
+
+}  // namespace
+
+LH_TEST(MismatchGroups, a_loop_reusing_one_block_is_one_group_and_says_so) {
+    // The exact shape of the report that prompted this: one line in a loop,
+    // eight iterations, and the allocator handing the same block back each
+    // time -- so even the addresses match.
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    std::vector<leakhunter::MismatchedFree> mismatches;
+    for (int i = 0; i < 8; ++i) {
+        mismatches.push_back(mismatchAt({kOperatorNewPc, kUserPc, kMainPc}, 0x4000,
+                                        5000 + static_cast<std::uint64_t>(i) * 700));
+    }
+
+    LeakReport report = analyzer.analyze({}, std::move(mismatches), statsWithMismatches(8));
+
+    LH_CHECK_EQ(report.mismatchGroups.size(), std::size_t{1});
+    const auto& group = report.mismatchGroups[0];
+    LH_CHECK_EQ(group.count, std::uint64_t{8});
+    LH_CHECK_EQ(group.totalBytes, std::uint64_t{8 * 512});
+    LH_CHECK_EQ(group.distinctAddresses, std::uint64_t{1});
+    LH_CHECK(group.recycledSameBlock());
+    LH_CHECK_EQ(group.function, std::string{"allocateBuffer"});
+    // The window the occurrences span, so a reader can see they are iterations.
+    LH_CHECK_EQ(group.firstSeenNs, std::uint64_t{5000});
+    LH_CHECK_EQ(group.lastSeenNs, std::uint64_t{5000 + 7 * 700});
+    // The flat list is untouched -- consumers that walk occurrences still can.
+    LH_CHECK_EQ(report.mismatchedFrees.size(), std::size_t{8});
+    LH_CHECK_EQ(group.mismatchIndices.size(), std::size_t{8});
+}
+
+LH_TEST(MismatchGroups, eight_distinct_blocks_are_not_called_a_reused_one) {
+    // Same site, same pairing, but genuinely eight different allocations held
+    // at once. Claiming "the same block reused" here would be a lie that reads
+    // as reassurance.
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    std::vector<leakhunter::MismatchedFree> mismatches;
+    for (int i = 0; i < 8; ++i) {
+        mismatches.push_back(mismatchAt({kOperatorNewPc, kUserPc, kMainPc},
+                                        0x4000 + static_cast<std::uint64_t>(i) * 0x100,
+                                        5000 + static_cast<std::uint64_t>(i) * 700));
+    }
+
+    LeakReport report = analyzer.analyze({}, std::move(mismatches), statsWithMismatches(8));
+
+    LH_CHECK_EQ(report.mismatchGroups.size(), std::size_t{1});
+    LH_CHECK_EQ(report.mismatchGroups[0].distinctAddresses, std::uint64_t{8});
+    LH_CHECK(!report.mismatchGroups[0].recycledSameBlock());
+}
+
+LH_TEST(MismatchGroups, one_function_getting_the_pairing_wrong_twice_is_two_groups) {
+    // new[]/free() and malloc/delete from the same function are two bugs with
+    // two different fixes. Merging them on the function alone would hide one.
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report = analyzer.analyze(
+        {},
+        {
+            mismatchAt({kOperatorNewPc, kUserPc}, 0x4000, 1000, AllocationKind::NewArray,
+                       ReleaseKind::Free),
+            mismatchAt({kOperatorNewPc, kUserPc}, 0x5000, 2000, AllocationKind::Malloc,
+                       ReleaseKind::Delete),
+        },
+        statsWithMismatches(2));
+
+    LH_CHECK_EQ(report.mismatchGroups.size(), std::size_t{2});
+}
+
+LH_TEST(MismatchGroups, different_functions_stay_separate) {
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report = analyzer.analyze({},
+                                         {
+                                             mismatchAt({kOperatorNewPc, kUserPc}, 0x4000, 1000),
+                                             mismatchAt({kOperatorNewPc, kOtherUserPc}, 0x5000,
+                                                        2000),
+                                         },
+                                         statsWithMismatches(2));
+
+    LH_CHECK_EQ(report.mismatchGroups.size(), std::size_t{2});
+}
+
+LH_TEST(MismatchGroups, a_single_occurrence_never_claims_a_reused_block) {
+    // One occurrence trivially has one distinct address. Reporting "reused"
+    // there would be nonsense derived from a true statement.
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report = analyzer.analyze({}, {mismatchAt({kOperatorNewPc, kUserPc}, 0x4000, 1000)},
+                                         statsWithMismatches(1));
+
+    LH_CHECK_EQ(report.mismatchGroups.size(), std::size_t{1});
+    LH_CHECK_EQ(report.mismatchGroups[0].count, std::uint64_t{1});
+    LH_CHECK(!report.mismatchGroups[0].recycledSameBlock());
+}
+
+LH_TEST(MismatchGroups, groups_are_ordered_by_how_often_they_happen) {
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    std::vector<leakhunter::MismatchedFree> mismatches{
+        mismatchAt({kOperatorNewPc, kUserPc}, 0x4000, 1000),
+    };
+    for (int i = 0; i < 5; ++i) {
+        mismatches.push_back(mismatchAt({kOperatorNewPc, kOtherUserPc}, 0x5000, 2000));
+    }
+
+    LeakReport report = analyzer.analyze({}, std::move(mismatches), statsWithMismatches(6));
+
+    LH_CHECK_EQ(report.mismatchGroups.size(), std::size_t{2});
+    LH_CHECK_EQ(report.mismatchGroups[0].function, std::string{"buildCache"});
+    LH_CHECK_EQ(report.mismatchGroups[0].count, std::uint64_t{5});
+    LH_CHECK_EQ(report.mismatchGroups[1].count, std::uint64_t{1});
+
+    // Sorting the groups must not invalidate indices into the flat list.
+    for (const auto& group : report.mismatchGroups) {
+        for (const std::size_t index : group.mismatchIndices) {
+            LH_CHECK(index < report.mismatchedFrees.size());
+        }
+    }
+}
+
+LH_TEST(MismatchGroups, a_clean_run_produces_no_groups) {
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report = analyzer.analyze({}, {}, SessionStats{});
+    LH_CHECK(report.mismatchGroups.empty());
+    LH_CHECK(!report.mismatchGroupsArePartial);
+}
+
+LH_TEST(MismatchGroups, the_group_counts_are_flagged_when_they_are_only_a_sample) {
+    // The registry stops recording individual mismatches long before it stops
+    // counting them. A group built from what survived describes a sample, and
+    // presenting it as a total would understate a real problem.
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report = analyzer.analyze({}, {mismatchAt({kOperatorNewPc, kUserPc}, 0x4000, 1000)},
+                                         statsWithMismatches(5000));
+
+    LH_CHECK(report.mismatchGroupsArePartial);
+    LH_CHECK_EQ(report.mismatchGroups[0].count, std::uint64_t{1});
+}
+
+LH_TEST(MismatchGroups, threads_are_counted_across_the_occurrences) {
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    std::vector<leakhunter::MismatchedFree> mismatches;
+    for (std::uint64_t thread = 1; thread <= 4; ++thread) {
+        mismatches.push_back(mismatchAt({kOperatorNewPc, kUserPc}, 0x4000 + thread * 0x100,
+                                        1000 * thread, AllocationKind::NewArray,
+                                        ReleaseKind::Free, thread));
+    }
+
+    LeakReport report = analyzer.analyze({}, std::move(mismatches), statsWithMismatches(4));
+    LH_CHECK_EQ(report.mismatchGroups[0].threadCount, std::uint64_t{4});
+}

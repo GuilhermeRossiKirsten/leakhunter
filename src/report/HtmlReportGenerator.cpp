@@ -106,6 +106,13 @@ h2 { margin: 2.25rem 0 .85rem; font-size: 1.15rem; }
 .tl-summary { color: var(--muted); font-size: .88rem; margin: .9rem 0 0; max-width: 78ch; }
 .timeline-warn { margin: .7rem 0 0; padding: .55rem .75rem; border-radius: 8px; font-size: .85rem;
   background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.ub .times { color: var(--danger); font-weight: 700; }
+.ub .reused { color: var(--muted); font-size: .85rem; margin: .1rem 0 .5rem; max-width: 80ch; }
+.occurrences { margin-top: .6rem; }
+.occurrences summary { cursor: pointer; color: var(--muted); font-size: .82rem; user-select: none; }
+.occurrences table { margin-top: .5rem; min-width: 0; background: transparent; }
+.occurrences th, .occurrences td { padding: .25rem .7rem .25rem 0; border-bottom: none; font-size: .8rem; }
+.occurrences th { background: transparent; text-transform: none; letter-spacing: 0; cursor: default; }
 .section-note { color: var(--muted); font-size: .88rem; max-width: 86ch; margin: 0 0 .9rem; }
 .hotspots { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .hotspots th, .hotspots td { padding: .55rem .8rem; border-bottom: 1px solid var(--border); text-align: left; }
@@ -344,23 +351,69 @@ constexpr std::string_view kScript = R"JS(
   // stays identical to the leak table's; the whole section stays hidden when
   // the run is clean, which is the common case.
   const mismatches = data.mismatchedFrees || [];
-  if (mismatches.length > 0) {
+  const mismatchGroups = data.mismatchGroups || [];
+  if (mismatchGroups.length > 0) {
     const section = document.getElementById('mismatch-section');
     section.classList.remove('hidden');
-    document.getElementById('mismatch-body').innerHTML = mismatches.map((m) => {
-      const blamed = m.responsibleFrame == null ? -1 : m.responsibleFrame;
-      const threads = m.allocatedOnThread === m.releasedOnThread
-        ? 'thread ' + m.allocatedOnThread
-        : 'allocated on thread ' + m.allocatedOnThread + ', released on ' + m.releasedOnThread;
+
+    // One card per site and pairing, not per occurrence. Eight turns of one
+    // loop used to render as eight identical cards -- same stack, same source,
+    // and even the same address, because the block is freed and handed straight
+    // back. That is indistinguishable by eye from the same bug reported eight
+    // times, which is a question readers should not have to ask.
+    document.getElementById('mismatch-body').innerHTML = mismatchGroups.map((g, gi) => {
+      const blamed = g.blamedFrame == null ? -1 : g.blamedFrame;
+      const times = g.count > 1 ? ' <span class="times">&times;' + g.count + '</span>' : '';
+
+      let meta = bytes(g.totalBytes) + ' across ' + g.count +
+                 (g.count === 1 ? ' block' : ' blocks');
+      if (g.threadCount > 1) meta += ' &middot; ' + g.threadCount + ' threads';
+
+      // The line that answers "did it run N times, or was it reported N times?"
+      const recycled = g.recycledSameBlock
+        ? '<div class="reused">The same block was reused across all ' + g.count +
+          ' &mdash; the allocator handed it straight back after each free. ' +
+          'These are iterations of one line, not ' + g.count + ' separate sites.</div>'
+        : (g.count > 1
+            ? '<div class="reused">' + g.distinctAddresses +
+              ' distinct blocks, so these are separate allocations rather than one line looping.' +
+              '</div>'
+            : '');
+
+      // Every occurrence, on demand. The flat list is still in the report, so
+      // nothing is lost by collapsing the default view.
+      const rows = (g.mismatchIndices || []).map((idx) => {
+        const m = mismatches[idx];
+        if (!m) return '';
+        return '<tr><td class="num">' + bytes(m.size) + '</td><td class="fn">' +
+               escapeHtml(m.address) + '</td><td class="num">' +
+               (m.timestampNs / 1e6).toFixed(3) + ' ms</td><td class="num">' +
+               m.releasedOnThread + '</td></tr>';
+      }).join('');
+
+      const occurrences = g.count > 1
+        ? '<details class="occurrences"><summary>' + g.count + ' occurrences</summary>' +
+          '<table><thead><tr><th class="num">Size</th><th>Address</th>' +
+          '<th class="num">At</th><th class="num">Thread</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody></table></details>'
+        : '';
+
       return '' +
         '<div class="ub">' +
-          '<div class="what">' + escapeHtml(m.description) + '</div>' +
-          '<div class="meta">' + bytes(m.size) + ' at ' + escapeHtml(m.address) +
-            ' &middot; ' + escapeHtml(threads) + '</div>' +
-          snippetHtml(m.snippet, 'allocated here') +
-          stackHtml(m.stackTrace || [], blamed) +
+          '<div class="what">' + escapeHtml(g.description) + times + '</div>' +
+          '<div class="meta">' + meta + '</div>' +
+          recycled +
+          snippetHtml(g.snippet, 'allocated here') +
+          stackHtml(g.stackTrace || [], blamed) +
+          occurrences +
         '</div>';
     }).join('');
+
+    if (data.mismatchGroupsArePartial) {
+      document.getElementById('mismatch-body').insertAdjacentHTML('beforeend',
+        '<p class="timeline-warn">More mismatched frees occurred than were listed, so these ' +
+        'counts are a sample rather than the total.</p>');
+    }
   }
 })();
 )JS";

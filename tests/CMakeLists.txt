@@ -188,6 +188,10 @@ if(LEAKHUNTER_BUILD_AGENT AND LEAKHUNTER_BUILD_EXAMPLES)
                    "EXPECT_MIN_GROUPS=3"
                    "EXPECT_MISMATCHES=8"
                    "EXPECT_MISMATCH_FUNCTION=copyPayload"
+                   # Eight occurrences of one line in a loop -- one group, and
+                   # one block the allocator kept handing back.
+                   "EXPECT_MISMATCH_GROUPS=1"
+                   "EXPECT_RECYCLED_BLOCK=1"
                    "EXPECT_MIN_THREADS=4"
                    "EXPECT_FUNCTION=indexBatch"
                    "EXPECT_EXIT=1")

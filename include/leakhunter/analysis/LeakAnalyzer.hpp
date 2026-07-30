@@ -73,6 +73,14 @@ public:
 
 private:
     void buildGroups(LeakReport& report) const;
+
+    /// Collapses the listed mismatched frees by call site and pairing.
+    ///
+    /// Runs over `report.mismatchedFrees` -- the survivors of suppression and
+    /// the listing cap -- for the same reason buildGroups() runs over
+    /// `report.leaks`: the group is a view of what was listed, and
+    /// `mismatchGroupsArePartial` says when that is less than the whole.
+    static void buildMismatchGroups(LeakReport& report);
     void addMismatches(LeakReport& report, std::vector<MismatchedFree> mismatches) const;
     void summariseSuppressions(
         LeakReport& report,

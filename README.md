@@ -125,8 +125,11 @@ every block was released -- through the wrong door
 - **Suppressions that stay honest.** `--suppressions leaks.supp` silences known leaks by function,
   module, source path or whole stack — and reports what it silenced, per rule, plus any rule that
   has rotted into matching nothing. Quiet output always means something.
-- **Mismatched frees.** `new[]` released with `delete`, `malloc` released with `delete`, and the
-  rest of that family. Undefined behaviour that usually keeps working right up until it doesn't.
+- **Mismatched frees, grouped.** `new[]` released with `delete`, `malloc` released with `delete`, and
+  the rest of that family — collapsed by call site *and* pairing, with a count. A loop gets the same
+  address back from the allocator every iteration, so eight turns of one line used to render as eight
+  identical findings; `distinctAddresses` now says outright whether they are iterations or separate
+  sites. Undefined behaviour that usually keeps working right up until it doesn't.
   Free at run time: the allocating entry point is already recorded, so the check is a comparison.
 - **Thread-aware.** Every allocation carries the kernel thread id that made it.
 - **Two reports.** A self-contained HTML page (no CDN, no assets directory) and a versioned JSON

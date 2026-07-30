@@ -260,6 +260,40 @@ json JsonReportGenerator::toJson(const analysis::LeakReport& report) {
     }
     document["mismatchedFrees"] = std::move(mismatches);
 
+    // The same findings by site and pairing, exactly as `groups` sits beside
+    // `leaks`. Additive, so schemaVersion stays put.
+    json mismatchGroups = json::array();
+    for (const analysis::MismatchGroup& group : report.mismatchGroups) {
+        json node{
+            {"function", group.function},
+            {"module", group.module},
+            {"location", group.location},
+            {"allocatedBy", toString(group.allocatedBy)},
+            {"releasedBy", toString(group.releasedBy)},
+            {"description", fmt::format("allocated with {}, released with {}",
+                                        toSourceSpelling(group.allocatedBy),
+                                        toSourceSpelling(group.releasedBy))},
+            {"count", group.count},
+            {"totalBytes", group.totalBytes},
+            // Fewer than `count` means the allocator handed the same block back
+            // each time: iterations of one loop, not that many distinct sites.
+            {"distinctAddresses", group.distinctAddresses},
+            {"recycledSameBlock", group.recycledSameBlock()},
+            {"firstSeenNs", group.firstSeenNs},
+            {"lastSeenNs", group.lastSeenNs},
+            {"threadCount", group.threadCount},
+            {"blamedFrame", group.blamedFrame},
+            {"mismatchIndices", group.mismatchIndices},
+            {"stackTrace", traceToJson(group.representativeTrace)},
+        };
+        if (!group.snippet.empty()) {
+            node["snippet"] = snippetToJson(group.snippet);
+        }
+        mismatchGroups.push_back(std::move(node));
+    }
+    document["mismatchGroups"] = std::move(mismatchGroups);
+    document["mismatchGroupsArePartial"] = report.mismatchGroupsArePartial;
+
     // What the suppression rules actually did. Present even when empty so a
     // consumer can always tell "no rules" from "rules that hid nothing".
     json fired = json::array();

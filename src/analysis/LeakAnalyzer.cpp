@@ -323,11 +323,88 @@ void LeakAnalyzer::addMismatches(LeakReport& report,
     report.suppressedMismatches =
         report.stats.mismatchedFrees > surviving ? report.stats.mismatchedFrees - surviving : 0;
 
+    // After the counters settle: mismatchGroupsArePartial reads
+    // suppressedMismatches, which is only final on the line above.
+    buildMismatchGroups(report);
+
     if (report.stats.mismatchedFrees > 0) {
         log::warn("{} block(s) were released through the wrong entry point -- this is undefined "
                   "behaviour, see the report",
                   report.stats.mismatchedFrees);
     }
+}
+
+void LeakAnalyzer::buildMismatchGroups(LeakReport& report) {
+    std::unordered_map<std::string, std::size_t> keyToIndex;
+    std::vector<std::unordered_set<std::uint64_t>> addressesPerGroup;
+    std::vector<std::unordered_set<std::uint64_t>> threadsPerGroup;
+
+    for (std::size_t index = 0; index < report.mismatchedFrees.size(); ++index) {
+        const MismatchedFree& mismatch = report.mismatchedFrees[index];
+        const StackFrame* frame = mismatch.responsible();
+
+        // The pairing belongs in the key. One function can get it wrong twice
+        // over -- a new[] released with free() and a malloc released with
+        // delete -- and those are two bugs with two different fixes, so folding
+        // them into one row would hide one of them.
+        // Qualified: this namespace declares its own toString(MismatchCheck),
+        // which hides the enum overloads in the enclosing one.
+        const std::string key = fmt::format("{}|{}|{}", groupKey(frame, mismatch.address),
+                                            leakhunter::toString(mismatch.allocatedBy),
+                                            leakhunter::toString(mismatch.releasedBy));
+
+        auto [position, inserted] = keyToIndex.try_emplace(key, report.mismatchGroups.size());
+        if (inserted) {
+            MismatchGroup group;
+            group.function = frame != nullptr ? frame->displayName() : "<unknown>";
+            group.module = frame != nullptr ? frame->module : std::string{};
+            if (frame != nullptr && frame->preciseName()) {
+                group.location = fmt::format("{}:{}", frame->file, frame->line);
+            } else if (frame != nullptr && !frame->module.empty()) {
+                group.location = fmt::format("{}+0x{:x}", frame->module, frame->moduleOffset());
+            }
+            group.allocatedBy = mismatch.allocatedBy;
+            group.releasedBy = mismatch.releasedBy;
+            group.representativeTrace = mismatch.trace;
+            group.blamedFrame = mismatch.responsibleFrame;
+            group.firstSeenNs = mismatch.timestampNs;
+            group.lastSeenNs = mismatch.timestampNs;
+
+            report.mismatchGroups.push_back(std::move(group));
+            addressesPerGroup.emplace_back();
+            threadsPerGroup.emplace_back();
+        }
+
+        MismatchGroup& group = report.mismatchGroups[position->second];
+        ++group.count;
+        group.totalBytes += mismatch.size;
+        group.mismatchIndices.push_back(index);
+        group.firstSeenNs = std::min(group.firstSeenNs, mismatch.timestampNs);
+        group.lastSeenNs = std::max(group.lastSeenNs, mismatch.timestampNs);
+
+        addressesPerGroup[position->second].insert(mismatch.address);
+        threadsPerGroup[position->second].insert(mismatch.releasedOnThread);
+    }
+
+    for (std::size_t i = 0; i < report.mismatchGroups.size(); ++i) {
+        report.mismatchGroups[i].distinctAddresses = addressesPerGroup[i].size();
+        report.mismatchGroups[i].threadCount = threadsPerGroup[i].size();
+    }
+
+    std::sort(report.mismatchGroups.begin(), report.mismatchGroups.end(),
+              [](const MismatchGroup& lhs, const MismatchGroup& rhs) {
+                  if (lhs.count != rhs.count) {
+                      return lhs.count > rhs.count;
+                  }
+                  if (lhs.totalBytes != rhs.totalBytes) {
+                      return lhs.totalBytes > rhs.totalBytes;
+                  }
+                  return lhs.function < rhs.function;  // deterministic across runs
+              });
+
+    // The indices above point into the flat list, which did not move; only the
+    // groups were reordered, so they stay valid.
+    report.mismatchGroupsArePartial = report.suppressedMismatches > 0;
 }
 
 void LeakAnalyzer::rankHotSpots(LeakReport& report, std::vector<AllocationSite> sites,

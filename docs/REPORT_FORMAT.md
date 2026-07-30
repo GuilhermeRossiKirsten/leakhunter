@@ -333,6 +333,58 @@ has no meaningful rate, and emitting `0.0` invites someone to plot it.
 "happened once" — every site looks clustered because the whole run is a cluster — so the pattern
 stays `unknown` and `advice` says why.
 
+## `mismatchGroups`
+
+Top level. The same findings as `mismatchedFrees`, collapsed by **call site and pairing** — exactly
+as `groups` sits beside `leaks`. Both arrays are always present; the flat one is unchanged.
+
+```jsonc
+{
+  "function": "poc::DocumentCache::copyPayload(long, unsigned long&) const",
+  "location": "poc/src/DocumentCache.cpp:69",
+  "allocatedBy": "new[]", "releasedBy": "free",
+  "description": "allocated with new[], released with free()",
+  "count": 8,
+  "totalBytes": 4096,
+  "distinctAddresses": 1,
+  "recycledSameBlock": true,
+  "firstSeenNs": 6311672, "lastSeenNs": 6320793,
+  "threadCount": 1,
+  "mismatchIndices": [0, 1, 2, 3, 4, 5, 6, 7]
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `function`, `module`, `location` | string | attributed exactly as a leak group is |
+| `allocatedBy` / `releasedBy` | string | the pairing; **part of the group key**, not decoration |
+| `count` / `totalBytes` | number | occurrences at this site, and their combined size |
+| `distinctAddresses` | number | how many different blocks the occurrences touched |
+| `recycledSameBlock` | boolean | `distinctAddresses < count` — see below |
+| `firstSeenNs` / `lastSeenNs` | number | window the occurrences span, from process start |
+| `threadCount` | number | distinct threads that did the releasing |
+| `mismatchIndices` | array | indices into `mismatchedFrees`, for every occurrence |
+
+`mismatchGroupsArePartial` sits beside the array: `true` means more mismatches occurred than were
+listed, so the counts are a sample.
+
+**The pairing is part of the key.** One function can get it wrong in two ways — a `new[]` released
+with `free()` and a `malloc` released with `delete` — and those are two bugs with two different
+fixes. Grouping on the function alone would hide one of them.
+
+### `recycledSameBlock` answers "did it run N times, or was it reported N times?"
+
+A loop that allocates and frees the same size repeatedly gets **the same address back every time**:
+the block is returned before the next request, so the allocator hands it straight back. Eight
+iterations then produce eight findings with an identical address, size, stack and source line —
+indistinguishable by eye from one finding printed eight times.
+
+`distinctAddresses` settles it. `1` across `count: 8` means one line looping; `8` means eight
+separate allocations. The timestamps in `mismatchedFrees` corroborate it.
+
+**This changes no verdict.** Grouping is presentational; `summary.mismatchedFreeCount`, the exit code
+and `summary.clean` are computed from the occurrences, not the groups.
+
 ## `hotSpots`
 
 Top level. The ten call sites that allocated the most bytes, **ranked by bytes allocated rather

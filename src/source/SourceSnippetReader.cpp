@@ -205,6 +205,20 @@ std::size_t SourceSnippetReader::enrich(analysis::LeakReport& report) {
         produced += mismatch.snippet.empty() ? 0 : 1;
     }
 
+    // Groups borrow the snippet their first occurrence already produced, rather
+    // than reading it again. Same file, same line, same bytes -- re-reading
+    // would spend the per-report byte budget on a duplicate and could push a
+    // later, genuinely different site past the limit.
+    for (analysis::MismatchGroup& group : report.mismatchGroups) {
+        if (group.mismatchIndices.empty()) {
+            continue;
+        }
+        const std::size_t first = group.mismatchIndices.front();
+        if (first < report.mismatchedFrees.size()) {
+            group.snippet = report.mismatchedFrees[first].snippet;
+        }
+    }
+
     // De-duplicate before anyone reports it: the same missing file is looked up
     // once per site.
     std::sort(missingFiles_.begin(), missingFiles_.end());

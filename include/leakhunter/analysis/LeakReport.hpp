@@ -82,6 +82,51 @@ struct LeakGroup {
     std::vector<std::size_t> leakIndices;  ///< into LeakReport::leaks
 };
 
+/// Mismatched frees sharing a call site *and* a pairing, which is how someone
+/// fixing them wants to read them: "this line does new[]/free(), 8 times".
+///
+/// Without this the report lists every occurrence separately, and eight turns
+/// of one loop look exactly like eight separate bugs -- especially since the
+/// allocator hands back the same address each time, so even the addresses match.
+struct MismatchGroup {
+    std::string function;
+    std::string module;
+    std::string location;  ///< "file:line" when known
+
+    /// Part of the key, not just decoration: one function can get the pairing
+    /// wrong in two different ways, and they are two different bugs with two
+    /// different fixes.
+    AllocationKind allocatedBy = AllocationKind::Unknown;
+    ReleaseKind releasedBy = ReleaseKind::Unknown;
+
+    std::uint64_t count = 0;
+    std::uint64_t totalBytes = 0;
+
+    /// How many distinct addresses the occurrences touched.
+    ///
+    /// Fewer than `count` means the allocator kept handing back the same block
+    /// -- a loop that frees and reallocates. That is exactly the distinction
+    /// needed to answer "did this run eight times, or was it reported eight
+    /// times?", and the flat listing cannot express it.
+    std::uint64_t distinctAddresses = 0;
+
+    std::uint64_t firstSeenNs = 0;
+    std::uint64_t lastSeenNs = 0;
+    std::uint64_t threadCount = 0;
+
+    StackTrace representativeTrace;
+    std::size_t blamedFrame = 0;
+    SourceSnippet snippet;
+
+    std::vector<std::size_t> mismatchIndices;  ///< into LeakReport::mismatchedFrees
+
+    /// True when the same block was released wrongly more than once, i.e. the
+    /// occurrences are iterations rather than separate sites.
+    [[nodiscard]] bool recycledSameBlock() const noexcept {
+        return count > 1 && distinctAddresses < count;
+    }
+};
+
 /// A call site ranked by how much memory passed through it, leaked or not.
 ///
 /// Deliberately not a leak. A function that allocates 4 GiB across a run and
@@ -152,6 +197,17 @@ struct LeakReport {
     /// was returned -- but undefined behaviour, and reported alongside because
     /// the tool is already holding the evidence.
     std::vector<MismatchedFree> mismatchedFrees;
+
+    /// The same findings by call site and pairing. Sorted by count, descending.
+    ///
+    /// Kept alongside the flat list rather than replacing it, exactly as
+    /// `groups` sits alongside `leaks`: consumers that walk every occurrence
+    /// keep working.
+    std::vector<MismatchGroup> mismatchGroups;
+
+    /// True when more mismatches happened than were listed, so the group counts
+    /// describe a sample rather than the total.
+    bool mismatchGroupsArePartial = false;
 
     /// Mismatches counted but not listed (beyond the listing cap).
     std::uint64_t suppressedMismatches = 0;

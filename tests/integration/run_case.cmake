@@ -20,6 +20,9 @@
 #   EXPECT_ABSENT         a function name that must NOT appear among the groups
 #   EXPECT_MIN_THREADS    minimum threadCount on some group
 #   EXPECT_MISMATCHES     exact number of mismatched frees
+#   EXPECT_MISMATCH_GROUPS
+#                         exact number of grouped mismatch sites
+#   EXPECT_RECYCLED_BLOCK 1 if the top mismatch group must be one block reused
 #   EXPECT_MISMATCH_FUNCTION
 #                         a function name that must appear among the mismatches
 #   EXPECT_EXIT           the exit code leakhunter itself must return
@@ -148,6 +151,63 @@ if(DEFINED EXPECT_TIMELINE)
     if(peakBytes LESS leakedBytes)
         message(FATAL_ERROR "timeline peak ${peakBytes} is below the ${leakedBytes} bytes "
                             "reported leaked, which cannot happen")
+    endif()
+endif()
+
+# Mismatched frees, collapsed by call site and pairing. The interesting number
+# is distinctAddresses: fewer than count means the allocator handed the same
+# block back each time, i.e. iterations of one line rather than that many sites.
+if(DEFINED EXPECT_MISMATCH_GROUPS)
+    string(JSON groupTotal ERROR_VARIABLE mmError LENGTH "${report}" mismatchGroups)
+    if(mmError)
+        message(FATAL_ERROR "the report carries no mismatchGroups: ${mmError}")
+    endif()
+    if(NOT groupTotal EQUAL EXPECT_MISMATCH_GROUPS)
+        message(FATAL_ERROR "expected ${EXPECT_MISMATCH_GROUPS} mismatch group(s), "
+                            "got ${groupTotal}")
+    endif()
+
+    string(JSON mismatchTotal GET "${report}" summary mismatchedFreeCount)
+    string(JSON groupsPartial GET "${report}" mismatchGroupsArePartial)
+
+    set(countSum 0)
+    if(groupTotal GREATER 0)
+        math(EXPR lastGroup "${groupTotal} - 1")
+        foreach(index RANGE ${lastGroup})
+            string(JSON gCount GET "${report}" mismatchGroups ${index} count)
+            string(JSON gAddrs GET "${report}" mismatchGroups ${index} distinctAddresses)
+            if(gAddrs GREATER gCount)
+                message(FATAL_ERROR "mismatch group ${index} touched ${gAddrs} addresses across "
+                                    "only ${gCount} occurrence(s), which cannot happen")
+            endif()
+            math(EXPR countSum "${countSum} + ${gCount}")
+        endforeach()
+    endif()
+
+    # Only meaningful when every occurrence was listed; past the cap the groups
+    # describe a sample and the flag says so.
+    if(NOT groupsPartial AND NOT countSum EQUAL mismatchTotal)
+        message(FATAL_ERROR "mismatch groups account for ${countSum} occurrence(s) but the "
+                            "summary reports ${mismatchTotal}")
+    endif()
+endif()
+
+if(DEFINED EXPECT_RECYCLED_BLOCK)
+    string(JSON firstCount GET "${report}" mismatchGroups 0 count)
+    string(JSON firstAddrs GET "${report}" mismatchGroups 0 distinctAddresses)
+    string(JSON recycled GET "${report}" mismatchGroups 0 recycledSameBlock)
+
+    # Assert on the numbers, not on the serialised boolean: CMake renders JSON
+    # true as ON, so STREQUAL "true" silently fails on correct data. The flag is
+    # still checked below, through if() truthiness, because consumers read it.
+    if(NOT firstAddrs LESS firstCount)
+        message(FATAL_ERROR "expected the first mismatch group to be one block reused, but it "
+                            "reports ${firstAddrs} distinct address(es) across ${firstCount} "
+                            "occurrence(s)")
+    endif()
+    if(NOT recycled)
+        message(FATAL_ERROR "recycledSameBlock is '${recycled}' although ${firstAddrs} address(es) "
+                            "cover ${firstCount} occurrence(s)")
     endif()
 endif()
 
