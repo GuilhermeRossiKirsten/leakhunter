@@ -126,6 +126,16 @@ section.hidden { display: none; }
 .snippet tr.blamed td.ln { color: var(--danger); font-weight: 600; }
 .snippet tr.caret td { color: var(--danger); font-weight: 600; }
 .snippet .note { color: var(--danger); font-weight: 600; }
+.triage { margin: 0 0 .85rem; padding: .7rem .9rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.triage .pat { font-weight: 650; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+.triage .pat.steady { color: var(--danger); }
+.triage .growth { font-family: var(--mono); font-size: .82rem; color: var(--danger); margin-top: .2rem; }
+.triage ul { margin: .45rem 0 .3rem; padding-left: 1.2rem; font-size: .87rem; }
+.triage li { margin: .15rem 0; }
+.triage .supp { margin-top: .45rem; font-size: .8rem; color: var(--muted); }
+.triage .supp code { font-family: var(--mono); background: var(--surface-alt); padding: .1rem .3rem; border-radius: 4px; }
+.limits { margin-top: 1rem; }
+.limits td { font-size: .87rem; }
 .ub { border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border)); background: color-mix(in srgb, var(--danger) 8%, transparent); border-radius: 10px; padding: .8rem 1rem; margin-bottom: .7rem; }
 .ub .what { font-weight: 600; color: var(--danger); font-size: .9rem; }
 .ub .meta { color: var(--muted); font-size: .8rem; margin: .15rem 0 .4rem; font-family: var(--mono); }
@@ -161,6 +171,30 @@ constexpr std::string_view kScript = R"JS(
       : escapeHtml(frame.module || '') + '+' + escapeHtml(frame.moduleOffset || '');
     return '<li class="' + (blamed ? 'blamed' : '') + '">' + name +
            ' <span class="where">' + where + '</span></li>';
+  };
+
+  // What the site is, how fast it grows, and what to do about it.
+  const triageHtml = (t) => {
+    if (!t || !t.pattern) return '';
+    const steady = t.pattern === 'steady' ? ' steady' : '';
+    let html = '<div class="triage"><div class="pat' + steady + '">' +
+               escapeHtml(t.pattern) + '</div><div>' + escapeHtml(t.description || '') + '</div>';
+    if (t.bytesPerHour) {
+      html += '<div class="growth">' + bytes(t.bytesPerHour) + '/hour &middot; ' +
+              bytes(t.bytesPerDay) + '/day at the rate observed here</div>';
+    }
+    if (t.sampleIsPartial) {
+      html += '<div class="supp">Timings come from a sample of this site’s blocks; ' +
+              'the rate uses its full byte count.</div>';
+    }
+    if (t.advice && t.advice.length) {
+      html += '<ul>' + t.advice.map((a) => '<li>' + escapeHtml(a) + '</li>').join('') + '</ul>';
+    }
+    if (t.suppressionRule) {
+      html += '<div class="supp">Accept it: <code>' + escapeHtml(t.suppressionRule) +
+              '</code></div>';
+    }
+    return html + '</div>';
   };
 
   const stackHtml = (trace, blamedIndex) =>
@@ -253,6 +287,7 @@ constexpr std::string_view kScript = R"JS(
         '<tr class="detail hidden" id="detail-' + index + '"><td colspan="5">' +
           // Source first, stack second: the line is the answer, the stack is
           // the evidence for it.
+          triageHtml(group.triage) +
           snippetHtml(group.snippet,
                       group.count + ' leak(s), ' + bytes(group.totalBytes) + ' here') +
           stackHtml(group.stackTrace || [], blamed) +

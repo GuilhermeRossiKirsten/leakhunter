@@ -55,11 +55,13 @@ void DocumentCache::evictAll() {
     documents_.clear();
 }
 
-char* DocumentCache::copyPayload(long id) const {
+char* DocumentCache::copyPayload(long id, std::size_t& bytes) const {
+    bytes = 0;
     const Document* document = find(id);
     if (document == nullptr) {
         return nullptr;
     }
+    bytes = document->payloadBytes;
 
     // Allocated with new[], so the caller must use delete[]. See bug #3 in
     // ReportBuilder.cpp, in a different translation unit -- which is precisely

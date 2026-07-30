@@ -230,6 +230,9 @@ LeakReport LeakAnalyzer::analyze(std::vector<AllocationInfo> liveAllocations,
     // come after it -- it reads the hit counts back off the SuppressionSet.
     addMismatches(report, std::move(mismatches));
     summariseSuppressions(report, ruleBytes);
+    // Triage deliberately does NOT run here. It needs the run's duration, and
+    // for a target we stopped that only exists in ProcessResult, which the
+    // Application fills in after this returns.
 
     log::debug("analysed {} leaks ({} bytes) into {} groups", report.leakCount, report.leakedBytes,
                report.groups.size());

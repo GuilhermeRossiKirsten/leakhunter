@@ -297,6 +297,42 @@ file, so `firstLine` is not always `blamedLine - context`.
 Controlled by `--no-source-snippets`, `--snippet-context` and `--source-root`. Off entirely under
 `--no-source`, since with no `file`/`line` there is nothing to read.
 
+## `triage`
+
+Present on a `groups[]` entry when the timings allowed a verdict. Absent, not null, when they did
+not — a site with no individually-listed leaks, or a run too short to classify.
+
+```jsonc
+{
+  "pattern": "steady",
+  "description": "spread across the run; grows with uptime",
+  "firstSeenNs": 201338,
+  "lastSeenNs": 3806751882,
+  "sampleIsPartial": false,
+  "bytesPerHour": 10232203.35,
+  "bytesPerDay": 245572880.5,
+  "suppressionRule": "function:*(anonymous namespace)::handleRequest*",
+  "advice": ["Grows with uptime: about 9.76 MiB/hour ...", "..."]
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `pattern` | string | `steady`, `startup`, `burst`, `one-shot` or `unknown` |
+| `description` | string | one line of plain language for the pattern |
+| `firstSeenNs` / `lastSeenNs` | number | window the site's listed leaks span, from process start |
+| `sampleIsPartial` | boolean | timings come from fewer blocks than the site leaked |
+| `bytesPerHour` / `bytesPerDay` | number | *(optional)* extrapolated; **only present for `steady`** |
+| `suppressionRule` | string | *(optional)* a rule that silences this exact site |
+| `advice` | array | what to do, most important first |
+
+`bytesPerHour` is deliberately absent for anything but `steady`: a block allocated once at start-up
+has no meaningful rate, and emitting `0.0` invites someone to plot it.
+
+**`unknown` is a real answer.** A run shorter than 250 ms cannot tell "grows with uptime" from
+"happened once" — every site looks clustered because the whole run is a cluster — so the pattern
+stays `unknown` and `advice` says why.
+
 ## `mismatchedFrees`
 
 A block released through an entry point that does not pair with the one that allocated it —
@@ -394,7 +430,7 @@ those leaks stay in the totals and are only missing from the listing.
 
 | Version | Change |
 |---|---|
-| 2 | Added `snippet` on groups and mismatched frees, and `column` on stack frames — both purely additive, so **no version bump**: a consumer that ignores unknown keys is unaffected, and `summary.clean` did not change meaning. Added `suppressions`, `summary.suppressedByRules`, `summary.suppressedByRulesBytes`, `summary.unusedSuppressionRules`, `mismatchedFrees`, `summary.mismatchedFreeCount`, `summary.suppressedMismatches` and `summary.mismatchDetection`. `summary.clean` now also requires `mismatchedFreeCount == 0`, which is why this is a version bump rather than an additive change. |
+| 2 | Added `triage` on groups — additive, `summary.clean` unchanged, so **no version bump**. Added `snippet` on groups and mismatched frees, and `column` on stack frames — both purely additive, so **no version bump**: a consumer that ignores unknown keys is unaffected, and `summary.clean` did not change meaning. Added `suppressions`, `summary.suppressedByRules`, `summary.suppressedByRulesBytes`, `summary.unusedSuppressionRules`, `mismatchedFrees`, `summary.mismatchedFreeCount`, `summary.suppressedMismatches` and `summary.mismatchDetection`. `summary.clean` now also requires `mismatchedFreeCount == 0`, which is why this is a version bump rather than an additive change. |
 | 1 | Initial format. |
 
 ## Stability guarantees

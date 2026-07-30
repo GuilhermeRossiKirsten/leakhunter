@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "leakhunter/analysis/LeakTriage.hpp"
 #include "leakhunter/core/Types.hpp"
 
 namespace leakhunter::analysis {
@@ -72,6 +73,10 @@ struct LeakGroup {
     /// The blamed line in its source context. One per site, not per leak: 700
     /// leaks across 3 sites means 3 snippets.
     SourceSnippet snippet;
+
+    /// How bad this site is and what to do about it. Filled in by
+    /// triageLeaks() after grouping; empty when nothing could be determined.
+    LeakTriage triage;
 
     std::vector<std::size_t> leakIndices;  ///< into LeakReport::leaks
 };

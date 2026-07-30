@@ -15,14 +15,19 @@ std::string summarise(const DocumentCache& cache, long firstId, std::size_t coun
     for (std::size_t offset = 0; offset < count; ++offset) {
         const long id = firstId + static_cast<long>(offset);
 
-        char* payload = cache.copyPayload(id);
+        std::size_t payloadBytes = 0;
+        char* payload = cache.copyPayload(id, payloadBytes);
         if (payload == nullptr) {
             continue;
         }
 
-        // Count the non-padding bytes; a stand-in for whatever real work would
-        // happen with the copy.
-        totalBytes += std::strlen(payload) > 0 ? std::strlen(payload) : 0;
+        // Use the length the cache reported. This used to be `strlen(payload)`,
+        // which read 513 bytes out of a 512-byte block -- the payload is bytes,
+        // not a string, and nothing NUL-terminates it. LeakHunter cannot see a
+        // read past the end of a live block; AddressSanitizer found it in 0.07s.
+        // Written up in docs/DETECTION.md, because a blind spot is worth more
+        // as a documented example than as a quietly fixed commit.
+        totalBytes += payloadBytes;
         ++seen;
 
         // -------------------------------------------------------------------

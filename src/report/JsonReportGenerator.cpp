@@ -6,6 +6,7 @@
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
 
+#include "leakhunter/analysis/LeakTriage.hpp"
 #include "leakhunter/core/Logger.hpp"
 
 namespace leakhunter::report {
@@ -133,6 +134,26 @@ json JsonReportGenerator::toJson(const analysis::LeakReport& report) {
         });
         if (!group.snippet.empty()) {
             groups.back()["snippet"] = snippetToJson(group.snippet);
+        }
+        if (!group.triage.empty()) {
+            json triage{
+                {"pattern", toString(group.triage.pattern)},
+                {"description", describe(group.triage.pattern)},
+                {"firstSeenNs", group.triage.firstSeenNs},
+                {"lastSeenNs", group.triage.lastSeenNs},
+                {"sampleIsPartial", group.triage.sampleIsPartial},
+                {"advice", group.triage.advice},
+            };
+            // Only meaningful for a steady site; emitting 0.0 elsewhere would
+            // invite someone to plot it.
+            if (group.triage.bytesPerHour > 0.0) {
+                triage["bytesPerHour"] = group.triage.bytesPerHour;
+                triage["bytesPerDay"] = group.triage.bytesPerHour * 24.0;
+            }
+            if (!group.triage.suppressionRule.empty()) {
+                triage["suppressionRule"] = group.triage.suppressionRule;
+            }
+            groups.back()["triage"] = std::move(triage);
         }
     }
     document["groups"] = std::move(groups);

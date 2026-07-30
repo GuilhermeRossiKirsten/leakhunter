@@ -8,6 +8,7 @@ add_executable(leakhunter_unit_tests
     unit/DiagnosticsTest.cpp
     unit/GlobTest.cpp
     unit/LeakAnalyzerTest.cpp
+    unit/LeakTriageTest.cpp
     unit/ReportGeneratorTest.cpp
     unit/SourceSnippetTest.cpp
     unit/SuppressionSetTest.cpp
@@ -251,6 +252,7 @@ if(LEAKHUNTER_BUILD_AGENT AND LEAKHUNTER_BUILD_EXAMPLES)
                         "-DSTOP_SIGNAL=${stopSignal}"
                         "-DRUN_SECONDS=2"
                         "-DEXPECT_FUNCTION=handleRequest"
+                        "-DEXPECT_PATTERN=steady"
                         -P "${CMAKE_CURRENT_SOURCE_DIR}/integration/run_longrunning.cmake")
             set_tests_properties(integration_longrunning_${stopSuffix} PROPERTIES
                 LABELS "integration" TIMEOUT 60)

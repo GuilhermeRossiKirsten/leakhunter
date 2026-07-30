@@ -95,6 +95,7 @@ contains only POD structs and `<cstdint>`. Nothing else crosses the boundary.
 | **SymbolResolver** | Address → function/file/line | know about leaks |
 | **LeakAnalyzer** | Blame a frame, group, sort, filter | do I/O |
 | **SuppressionSet** | Parse rules, match a stack against them | know what a leak *is* |
+| **LeakTriage** | Classify a site by time, advise, suggest a rule | do I/O, or read a clock |
 | **SourceSnippetReader** | (file, line) → the surrounding source text | know what a leak *is* |
 | **DiagnosticsWriter** | Render findings as compiler diagnostics | do analysis |
 | **ReportGenerator** | Render one format | change the data |

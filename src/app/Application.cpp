@@ -13,6 +13,7 @@
 #include <fmt/format.h>
 
 #include "leakhunter/analysis/LeakAnalyzer.hpp"
+#include "leakhunter/analysis/LeakTriage.hpp"
 #include "leakhunter/analysis/SuppressionSet.hpp"
 #include "leakhunter/core/AgentLocator.hpp"
 #include "leakhunter/report/DiagnosticsWriter.hpp"
@@ -124,6 +125,7 @@ private:
                                       const analysis::LeakReport& report);
     void printSummary(const analysis::LeakReport& report, const cli::Options& options) const;
     void printSnippet(const SourceSnippet& snippet) const;
+    void printTriage(const analysis::LeakTriage& triage) const;
 
     std::unique_ptr<process::IProcessRunner> runner_;
     std::ostream& out_;
@@ -269,6 +271,11 @@ ExitCode Application::Impl::run(const cli::Options& options) {
     report.targetCommand = joinCommand(options.targetCommand);
     report.mismatchCheck = mismatchCheck;
 
+    // Now, not inside analyze(): triage needs the run's duration, and for a
+    // target we stopped there is no end record, so the only source is the wall
+    // clock in ProcessResult -- which is assigned on the line above.
+    analysis::triageLeaks(report);
+
     // 6b. Read the blamed lines out of the source tree.
     //
     //     After analysis, not during: the analyzer decides *which* frame is to
@@ -395,6 +402,25 @@ void Application::Impl::printSnippet(const SourceSnippet& snippet) const {
     out_ << "                    " << marker << '\n';
 }
 
+void Application::Impl::printTriage(const analysis::LeakTriage& triage) const {
+    if (triage.empty()) {
+        return;
+    }
+
+    out_ << fmt::format("                        [{}] {}\n", analysis::toString(triage.pattern),
+                        describe(triage.pattern));
+
+    // Only the first line of advice here. The rest is in the reports: a terminal
+    // summary that scrolls is one nobody reads to the end of.
+    if (!triage.advice.empty()) {
+        out_ << fmt::format("                        {}\n", triage.advice.front());
+    }
+    if (!triage.suppressionRule.empty()) {
+        out_ << fmt::format("                        accept it with:  {}\n",
+                            triage.suppressionRule);
+    }
+}
+
 void Application::Impl::printSummary(const analysis::LeakReport& report,
                                      const cli::Options& options) const {
     if (options.verbosity == log::Level::Quiet) {
@@ -501,6 +527,7 @@ void Application::Impl::printSummary(const analysis::LeakReport& report,
             // between being told where to look and being shown.
             if (i < kSnippetsInSummary) {
                 printSnippet(group.snippet);
+                printTriage(group.triage);
             }
         }
         if (report.groups.size() > shown) {

@@ -104,6 +104,9 @@ every block was released -- through the wrong door
 - **Real stack traces.** DWARF CFI unwinding via the compiler runtime, with libunwind as an
   opt-in alternative. Symbols come from `dladdr` plus a DWARF pass through `llvm-symbolizer`,
   which is what recovers the names of `static` functions that never reach the dynamic symbol table.
+- **Triage, not just a list.** Each site is classified by when its leaks happened — a fixed start-up
+  cost reads differently from one growing 200 MiB/day — with an extrapolated rate, advice keyed to
+  the allocator used, and a ready-to-paste suppression rule.
 - **Attribution, not just addresses.** Allocator frames are skipped so the blame lands on *your*
   function, and leaks are grouped by that function.
 - **The leaking line, shown.** Reports include the source line itself with a caret on the exact
@@ -263,6 +266,7 @@ These are deliberate, and documented rather than hidden:
 | [poc2/](poc2/) | A long-running service: stop it with Ctrl-C and still get the report |
 | [poc3/](poc3/) & [poc4/](poc4/) | The same program in **C++23** and **C++98** — identical findings, because interception happens below the language |
 | [poc5/](poc5/) | **The negative control.** 12,000 allocations through smart pointers, RAII unwinding and a pmr arena — reported clean |
+| [DETECTION.md](docs/DETECTION.md) | **The landscape.** Five detection strategies, a measured head-to-head against ASan/LSan, and when to use something else |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Modules, diagrams, execution flow, design rationale |
 | [USAGE.md](docs/USAGE.md) | Complete CLI reference and recipes |
 | [REPORT_FORMAT.md](docs/REPORT_FORMAT.md) | JSON schema |

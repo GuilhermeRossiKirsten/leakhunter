@@ -8,6 +8,7 @@
 #   RUN_SECONDS       how long to let the target run before stopping it
 #   STOP_SIGNAL       INT or TERM
 #   EXPECT_FUNCTION   a function name that must be blamed
+#   EXPECT_PATTERN    the triage pattern the site must be classified as
 
 if(NOT LEAKHUNTER OR NOT TARGET_BIN OR NOT OUTPUT)
     message(FATAL_ERROR "run_longrunning.cmake: LEAKHUNTER, TARGET_BIN and OUTPUT are required")
@@ -102,6 +103,33 @@ if(DEFINED EXPECT_FUNCTION)
     endforeach()
     if(NOT found)
         message(FATAL_ERROR "expected a leak blamed on '${EXPECT_FUNCTION}'")
+    endif()
+endif()
+
+# A service stopped by hand writes no end marker, so the run duration can only
+# come from the host's wall clock. If that fallback breaks, the pattern silently
+# becomes "unknown" and the growth rate disappears -- which is the one number
+# this target exists to produce.
+if(DEFINED EXPECT_PATTERN)
+    string(JSON pattern ERROR_VARIABLE noTriage GET "${report}" groups 0 triage pattern)
+    if(NOT noTriage STREQUAL "NOTFOUND")
+        message(FATAL_ERROR "the site carries no triage at all")
+    endif()
+    message(STATUS "triage pattern: ${pattern}")
+    if(NOT pattern STREQUAL "${EXPECT_PATTERN}")
+        message(FATAL_ERROR "expected pattern '${EXPECT_PATTERN}', got '${pattern}'")
+    endif()
+
+    string(JSON growth GET "${report}" groups 0 triage bytesPerHour)
+    message(STATUS "extrapolated growth: ${growth} bytes/hour")
+    if(growth LESS_EQUAL 0)
+        message(FATAL_ERROR "a steady site must extrapolate to a positive rate")
+    endif()
+
+    string(JSON rule GET "${report}" groups 0 triage suppressionRule)
+    message(STATUS "suggested rule: ${rule}")
+    if(rule STREQUAL "")
+        message(FATAL_ERROR "no suppression rule was suggested")
     endif()
 endif()
 

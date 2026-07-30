@@ -6,6 +6,7 @@
 # ---------------------------------------------------------------------------
 add_library(leakhunter_core STATIC
     analysis/LeakAnalyzer.cpp
+    analysis/LeakTriage.cpp
     analysis/SuppressionSet.cpp
     cli/CommandLineParser.cpp
     core/AgentLocator.cpp

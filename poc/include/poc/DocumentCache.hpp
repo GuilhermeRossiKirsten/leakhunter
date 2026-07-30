@@ -36,7 +36,14 @@ public:
 
     /// Hands out a raw copy of a document's payload for the caller to release.
     /// The contract is documented; whether the caller honours it is bug #3.
-    [[nodiscard]] char* copyPayload(long id) const;
+    ///
+    /// @param bytes receives the size of the copy. The payload is **not**
+    ///        NUL-terminated -- it is bytes, not a string -- so the caller has
+    ///        no way to discover the length on its own. Returning it is not a
+    ///        convenience: without it the only thing a caller can reach for is
+    ///        strlen, which reads past the end. AddressSanitizer caught exactly
+    ///        that here; see docs/DETECTION.md.
+    [[nodiscard]] char* copyPayload(long id, std::size_t& bytes) const;
 
 private:
     std::vector<Document*> documents_;
