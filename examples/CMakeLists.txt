@@ -22,6 +22,16 @@ leakhunter_add_example(mismatched_free)
 leakhunter_add_example(spawns_child)
 leakhunter_add_example(forks_and_closes_fds)
 
+# A non-PIE build of an existing example. Position-dependent executables are
+# mapped at their link address, so the module-relative offset a symbolizer is
+# normally given is wrong for them -- SourceLineResolver retries with the
+# absolute address, and nothing exercised that path until this target existed.
+add_executable(simple_leak_nopie simple_leak.cpp)
+target_compile_options(simple_leak_nopie PRIVATE -g -fno-omit-frame-pointer -O0 -fno-pie)
+target_link_options(simple_leak_nopie PRIVATE -no-pie)
+set_target_properties(simple_leak_nopie PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples")
+
 # The mismatches in this one are the point of the example, so the compiler must
 # not refuse to build it. GCC's -Wmismatched-new-delete catches the two cases it
 # can see locally; the whole value of LeakHunter here is catching the ones that

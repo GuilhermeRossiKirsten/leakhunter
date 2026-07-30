@@ -33,7 +33,7 @@ endif()
 option(LEAKHUNTER_BUILD_AGENT    "Build the LD_PRELOAD interception agent" ${LEAKHUNTER_AGENT_SUPPORTED})
 option(LEAKHUNTER_BUILD_TESTS    "Build the test suite"                    ON)
 option(LEAKHUNTER_BUILD_EXAMPLES "Build the example programs"              ON)
-option(LEAKHUNTER_BUILD_POC      "Build the poc/ demonstration program"    ON)
+option(LEAKHUNTER_BUILD_POC      "Build the poc/ and poc2/ demonstrations"  ON)
 option(LEAKHUNTER_WERROR         "Treat warnings as errors"                OFF)
 
 include(GNUInstallDirs)
@@ -57,6 +57,7 @@ endif()
 # demonstration that stops working. An integration test pins its numbers.
 if(LEAKHUNTER_BUILD_POC)
     add_subdirectory(poc)
+    add_subdirectory(poc2)
 endif()
 
 if(LEAKHUNTER_BUILD_TESTS)

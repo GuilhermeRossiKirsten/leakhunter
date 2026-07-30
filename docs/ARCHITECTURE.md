@@ -416,7 +416,29 @@ does not match the process it launched, as a backstop rather than a primary defe
 dramatically smaller for spawning targets: `g++ -c` went from a 30 MB trace (almost all of it
 orphaned child data that was written and never read) to 58 KB.
 
-### 12. A symbolizer that was rejecting every invocation
+### 12. Ending a run against something that never ends
+
+Pointing the tool at a service means the run stops when the user stops it. That did not work:
+`Ctrl-C` killed the host, left the target **orphaned and still running**, and wrote no report.
+
+`PosixProcessRunner` now owns `SIGINT` and `SIGTERM` for the lifetime of the child, through a scoped
+guard that restores the previous handlers afterwards — this is a library as much as a program, and
+leaving our handlers installed would change the behaviour of whatever called us.
+
+The handler does only what is async-signal-safe: record the signal in a `sig_atomic_t` and `kill()`
+the child. The child cannot have been reaped yet, because `waitpid()` is still blocked in the main
+flow, so the pid cannot have been recycled. The agent's own handler then flushes and re-raises, and
+`waitpid()` returns to the ordinary reporting path. **A second signal restores the default and
+re-raises**, so a wedged target can never trap the user.
+
+What did need thought is the *wording*. A trace with no end marker normally means the target crashed;
+here it is the designed outcome. Three places would otherwise have described the user's own Ctrl-C as
+a malfunction — the "did not shut down cleanly" warning, the HTML "Partial data" notice, and the
+terminal summary. All three now branch on `ProcessResult::stoppedByRequest`, which is also exposed as
+`run.stoppedByRequest` so a consumer can tell the two apart. `summary.droppedRecords` still reports 1,
+because the trace really is unterminated and a completeness gate should still see that.
+
+### 13. A symbolizer that was rejecting every invocation
 
 Found while adding source snippets, and it had been there the whole time.
 
@@ -445,7 +467,7 @@ Two changes, and the second matters more than the first:
 `enrich()` also warns when it resolved *nothing at all*, which is the symptom a user actually
 observes.
 
-### 13. Mismatched frees, and the one configuration that fakes them
+### 14. Mismatched frees, and the one configuration that fakes them
 
 Pairing "how was this allocated" with "how was it released" is nearly free: `AllocKind` was already
 in every allocation record, and the deallocation record's header had a spare `kind` byte doing
@@ -545,6 +567,7 @@ LeakHunter/
 │   └── integration/            # run_case.cmake — real CLI, real agent, real programs
 ├── examples/                   # one program per leak shape
 ├── poc/                        # docindex: a realistic demo with four planted defects
+├── poc2/                       # service: a long-running target you stop by hand
 └── docs/
 ```
 
@@ -555,6 +578,11 @@ LeakHunter/
 The wire format is tested by hand-writing a trace exactly as the agent would and reading it back
 through the real `FileTraceSource` — a layout change on either side breaks there rather than in
 production.
+
+Both are built and run with **GCC 13.3 and Clang 18.1**, and must agree. They disagree in ways worth
+guarding: different inlining changes which enclosing function a site is blamed on, one accepts
+warning flags the other rejects under `-Werror` (`-Wno-builtin-declaration-mismatch` is GCC-only and
+had to be guarded), and Clang's `-Wunused-private-field` found a dead member GCC never mentioned.
 
 **Integration tests** run the real CLI against real programs and assert on `report.json`:
 
@@ -576,9 +604,18 @@ production.
 | `poc/docindex --suppressions` | the worked suppression file still hides exactly its 100 and nothing else |
 | `poc/docindex` snippets | the blamed line read back from disk contains `malloc(kScratchBytes)` — the whole chain, from interception through DWARF to the file |
 | `poc/docindex --no-source-snippets` | zero snippets, everything else identical |
+| `poc2/service` stopped with SIGINT / SIGTERM | a target that never exits still reports; `run.stoppedByRequest` set, no orphan left behind |
+| `simple_leak_nopie` | a position-dependent executable still symbolises (the absolute-address retry) |
+| `multiple_leaks`, stripped | all 111 leaks still found, every site honest about having no name |
 | `multiple_leaks --suppressions` | 111 leaks become 11; the suppressed site is absent and the other two remain |
 | `multiple_leaks` + suppress-all | exit code 0, and the 112 hidden leaks still counted in `suppressedByRules` |
 | `multiple_leaks` + rotted rule | `--strict-suppressions` turns a rule that matched nothing into exit 2 |
 
 The absence assertions matter as much as the presence ones: a leak detector that reports
 everything is as useless as one that reports nothing.
+
+**A trap in writing any of these.** C++ permits eliding allocations, and both compilers do it: a
+test program whose allocations are not observable can be compiled down to nothing, and the resulting
+"wrong" count looks like a bug in LeakHunter rather than in the test. Clang at `-O1` removed 500
+allocations from `poc/` this way. Store the pointer somewhere observable, or through a `volatile`
+sink. `-Wunused-result` is the compiler saying so in advance.

@@ -236,9 +236,13 @@ Status FileTraceSource::replay(ITraceVisitor& visitor) {
     if (!sawEnd) {
         // The target crashed, called _exit(), or was killed. Everything read so
         // far is still valid, so flag it and report what we have.
-        log::warn(
-            "trace has no end marker -- the target did not shut down cleanly, results may be "
-            "incomplete");
+        if (endMarkerOptional_) {
+            log::debug("trace has no end marker, as expected for a target we stopped");
+        } else {
+            log::warn(
+                "trace has no end marker -- the target did not shut down cleanly, results may be "
+                "incomplete");
+        }
         summary.droppedRecords = summary.droppedRecords == 0 ? 1 : summary.droppedRecords;
     }
     if (truncated) {

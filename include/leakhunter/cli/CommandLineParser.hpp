@@ -23,7 +23,10 @@ namespace leakhunter::cli {
 /// `--verbose` to `./app`, not to LeakHunter. `--` forces the split explicitly.
 class CommandLineParser {
 public:
-    explicit CommandLineParser(std::ostream& out, std::ostream& err);
+    /// @param out where `--help` and `--version` are written. Errors are not:
+    ///        they come back as an Error for the caller to place, which is why
+    ///        there is no error stream here.
+    explicit CommandLineParser(std::ostream& out);
 
     [[nodiscard]] Result<Options> parse(std::span<const std::string_view> args) const;
 
@@ -35,7 +38,6 @@ public:
 
 private:
     std::ostream& out_;
-    std::ostream& err_;
 };
 
 }  // namespace leakhunter::cli

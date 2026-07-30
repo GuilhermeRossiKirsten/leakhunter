@@ -195,6 +195,15 @@ struct ProcessResult {
     std::uint64_t pid = 0;
     std::uint64_t durationMs = 0;
 
+    /// True when LeakHunter stopped the target on the user's behalf -- Ctrl-C,
+    /// or a SIGTERM to leakhunter itself.
+    ///
+    /// Worth distinguishing from any other signal death: a program that was
+    /// deliberately stopped has not misbehaved, and a report that calls that
+    /// "terminated by signal 2, data may be missing" reads like a failure when
+    /// it is the intended way to end a run against a service.
+    bool stoppedByRequest = false;
+
     [[nodiscard]] bool exitedCleanly() const noexcept {
         return started && terminatingSignal == 0 && exitCode == 0;
     }

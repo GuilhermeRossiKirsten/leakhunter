@@ -136,6 +136,11 @@ ExitCode Application::Impl::run(const cli::Options& options) {
     tracker::MemoryTracker memoryTracker(allocations, resolver);
     tracker::FileTraceSource source(trace.path());
 
+    // A target we stopped ourselves has no end marker by construction. Telling
+    // the reader that up front keeps it from calling the user's own Ctrl-C an
+    // unclean shutdown.
+    source.expectNoEndMarker(processResult.value().stoppedByRequest);
+
     if (Status consumed = memoryTracker.consume(source); !consumed) {
         err_ << "leakhunter: " << consumed.message() << '\n';
 
@@ -339,6 +344,12 @@ void Application::Impl::printSummary(const analysis::LeakReport& report,
     out_ << fmt::format("  memory leaked       {:>12}\n", formatBytes(report.leakedBytes));
     out_ << fmt::format("  leaks               {:>12}  in {} distinct site(s)\n", report.leakCount,
                         report.groups.size());
+    if (report.process.stoppedByRequest) {
+        // The target was a service and you ended the run. Saying so stops the
+        // incomplete trace below reading as a malfunction.
+        out_ << "                        (still running when you stopped it; this is everything "
+                "up to that moment)\n";
+    }
     if (report.runtimeLeakCount > 0 && !options.includeRuntimeLeaks) {
         out_ << fmt::format("  runtime blocks      {:>12}  ({}, not listed; --include-runtime)\n",
                             report.runtimeLeakCount, formatBytes(report.runtimeLeakedBytes));

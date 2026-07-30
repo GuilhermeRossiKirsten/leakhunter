@@ -79,6 +79,88 @@ void formatTracedPid(char* buffer, std::size_t capacity, long pid) noexcept {
 
 namespace {
 
+// --- stopping a target that never stops on its own -------------------------
+//
+// Pointing LeakHunter at a service means the run ends when *you* end it. Before
+// this existed, Ctrl-C killed the host, left the target orphaned and still
+// running, and produced no report at all -- the one case where a leak detector
+// is most obviously wanted was the one it could not serve.
+//
+// The handler does the minimum that is async-signal-safe: record the signal and
+// pass it to the child. The child's own agent has a handler for exactly these
+// signals which flushes the trace and re-raises, so by the time waitpid()
+// returns there is a complete trace on disk and the normal reporting path takes
+// over. Nothing about the analysis needs to know this happened.
+
+volatile sig_atomic_t g_childPid = 0;
+volatile sig_atomic_t g_stopSignal = 0;
+volatile sig_atomic_t g_stopRequests = 0;
+
+extern "C" void onStopRequested(int signalNumber) {
+    // Read-then-write rather than `++`: compound assignment on a volatile is
+    // deprecated in C++20.
+    const sig_atomic_t previousRequests = g_stopRequests;
+    g_stopRequests = previousRequests + 1;
+
+    if (previousRequests > 0) {
+        // The user asked twice. Whatever we are waiting for is not coming;
+        // restore the default and let the signal do what it normally would, so
+        // there is always a way out.
+        struct sigaction defaultAction{};
+        defaultAction.sa_handler = SIG_DFL;
+        ::sigemptyset(&defaultAction.sa_mask);
+        ::sigaction(signalNumber, &defaultAction, nullptr);
+        ::raise(signalNumber);
+        return;
+    }
+
+    g_stopSignal = signalNumber;
+
+    const pid_t child = static_cast<pid_t>(g_childPid);
+    if (child > 0) {
+        // Not yet reaped -- waitpid() is still blocked in the main flow -- so
+        // this pid cannot have been recycled.
+        (void)::kill(child, signalNumber);
+    }
+}
+
+/// Installs the stop handlers, restoring the previous ones on destruction.
+///
+/// Scoped rather than global because this is a library as much as a program:
+/// leaving our handlers installed after run() returns would change the
+/// behaviour of whatever called us.
+class StopHandlers {
+public:
+    explicit StopHandlers(pid_t child) {
+        g_childPid = child;
+        g_stopSignal = 0;
+        g_stopRequests = 0;
+
+        struct sigaction action{};
+        action.sa_handler = &onStopRequested;
+        ::sigemptyset(&action.sa_mask);
+        action.sa_flags = 0;  // no SA_RESTART: waitpid must return EINTR
+
+        ::sigaction(SIGINT, &action, &previousInt_);
+        ::sigaction(SIGTERM, &action, &previousTerm_);
+    }
+
+    ~StopHandlers() {
+        ::sigaction(SIGINT, &previousInt_, nullptr);
+        ::sigaction(SIGTERM, &previousTerm_, nullptr);
+        g_childPid = 0;
+    }
+
+    StopHandlers(const StopHandlers&) = delete;
+    StopHandlers& operator=(const StopHandlers&) = delete;
+
+    [[nodiscard]] static int signalReceived() { return static_cast<int>(g_stopSignal); }
+
+private:
+    struct sigaction previousInt_ {};
+    struct sigaction previousTerm_ {};
+};
+
 /// Appends to an existing LD_PRELOAD rather than replacing it: the target may
 /// legitimately rely on its own preloads, and clobbering them would change the
 /// behaviour we are supposed to be observing.
@@ -206,6 +288,10 @@ Result<ProcessResult> PosixProcessRunner::run(const ProcessSpec& spec) {
     // --- parent ------------------------------------------------------------
     ::close(execPipe[1]);
 
+    // From here until waitpid() returns, Ctrl-C and SIGTERM are ours: they get
+    // forwarded to the target instead of killing us and orphaning it.
+    const StopHandlers stopHandlers(pid);
+
     int childErrno = 0;
     ssize_t bytesRead = 0;
     do {
@@ -218,6 +304,9 @@ Result<ProcessResult> PosixProcessRunner::run(const ProcessSpec& spec) {
         if (errno != EINTR) {
             return Error{fmt::format("waitpid() failed: {}", std::strerror(errno))};
         }
+        // EINTR here is the expected path when a stop was requested: the handler
+        // has already passed the signal on, so going back to waiting is right --
+        // the child is on its way out and we want its exit status.
     }
 
     if (bytesRead == static_cast<ssize_t>(sizeof(childErrno))) {
@@ -232,14 +321,22 @@ Result<ProcessResult> PosixProcessRunner::run(const ProcessSpec& spec) {
     result.pid = static_cast<std::uint64_t>(pid);
     result.durationMs = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
+    result.stoppedByRequest = StopHandlers::signalReceived() != 0;
 
     if (WIFEXITED(status)) {
         result.exitCode = WEXITSTATUS(status);
     } else if (WIFSIGNALED(status)) {
         result.terminatingSignal = WTERMSIG(status);
         result.exitCode = 128 + result.terminatingSignal;
-        log::warn("target terminated by signal {} ({})", result.terminatingSignal,
-                  ::strsignal(result.terminatingSignal));
+
+        if (result.stoppedByRequest) {
+            log::info("stopped the target with signal {} ({}); reporting what it did up to that "
+                      "point",
+                      result.terminatingSignal, ::strsignal(result.terminatingSignal));
+        } else {
+            log::warn("target terminated by signal {} ({})", result.terminatingSignal,
+                      ::strsignal(result.terminatingSignal));
+        }
     }
 
     return result;

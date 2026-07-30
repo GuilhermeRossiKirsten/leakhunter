@@ -15,7 +15,9 @@ leaks, attribute them to a function, and produce a report you can read or feed t
 reports blocks released through the wrong entry point (`new[]` freed with `delete`), because it
 already has the evidence and the check costs nothing.
 
-**Try it in one command:** [`./poc/run_demo.sh`](poc/) builds a small document indexer with four
+**Try it in one command:** [`./poc2/run_demo.sh`](poc2/) starts a service that leaks on every tick,
+stops it, and reports — showing that a process which never exits on its own is still something you
+can point this at. For attribution across a realistic codebase, [`./poc/run_demo.sh`](poc/) builds a small document indexer with four
 planted defects — an error-path leak, a `clear()` on a container of raw pointers, a `new[]` released
 with `free()` across translation units, and a 2 KiB-per-batch leak on worker threads — and shows
 LeakHunter naming each one with its file and line. The program exits `0` and looks healthy without
@@ -120,7 +122,7 @@ every block was released -- through the wrong door
 | | |
 |---|---|
 | OS | Linux (x86-64, aarch64). See [ROADMAP](docs/ROADMAP.md) for Windows and macOS. |
-| Compiler | C++20 — GCC 11+ or Clang 14+ |
+| Compiler | C++20. Built and tested with **GCC 13.3** and **Clang 18.1** (identical results); GCC 11+ / Clang 14+ should work, but are not what CI runs |
 | Build | CMake 3.20+ |
 | Required deps | fmt, spdlog, nlohmann/json — fetched automatically if not installed |
 | Optional deps | `llvm` (`llvm-symbolizer`, for file:line), `libunwind-dev` (only with `-DLEAKHUNTER_WITH_LIBUNWIND=ON`) |
@@ -253,6 +255,7 @@ These are deliberate, and documented rather than hidden:
 | | |
 |---|---|
 | [poc/](poc/) | **Start here.** A working program with four planted defects, and what LeakHunter says about it |
+| [poc2/](poc2/) | A long-running service: stop it with Ctrl-C and still get the report |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Modules, diagrams, execution flow, design rationale |
 | [USAGE.md](docs/USAGE.md) | Complete CLI reference and recipes |
 | [REPORT_FORMAT.md](docs/REPORT_FORMAT.md) | JSON schema |

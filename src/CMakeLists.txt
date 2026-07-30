@@ -102,9 +102,16 @@ if(LEAKHUNTER_BUILD_AGENT)
 
     target_compile_options(leakhunter_agent PRIVATE
         # Frame pointers make the fallback unwinder usable and cost little.
-        -fno-omit-frame-pointer
-        # The interceptors deliberately redefine libc symbols.
-        -Wno-builtin-declaration-mismatch)
+        -fno-omit-frame-pointer)
+
+    # The interceptors deliberately redefine libc symbols, which GCC warns about.
+    # The flag must be guarded: Clang has no such warning, and passing an unknown
+    # -Wno-* to it is an *error* under -Werror (-Wunknown-warning-option). That
+    # made -DLEAKHUNTER_WERROR=ON fail outright with Clang, in spite of the README
+    # advertising Clang 14+.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(leakhunter_agent PRIVATE -Wno-builtin-declaration-mismatch)
+    endif()
 
     # A shared library tolerates undefined symbols by default, which turns a
     # missing source file into a crash inside the *target* process at the first

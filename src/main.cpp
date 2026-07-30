@@ -14,7 +14,7 @@ int main(int argc, char** argv) {
     using namespace leakhunter;
 
     try {
-        const cli::CommandLineParser parser(std::cout, std::cerr);
+        const cli::CommandLineParser parser(std::cout);
 
         auto options = parser.parse(argc, argv);
         if (!options) {

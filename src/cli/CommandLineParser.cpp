@@ -35,8 +35,7 @@ template <typename T>
 
 }  // namespace
 
-CommandLineParser::CommandLineParser(std::ostream& out, std::ostream& err)
-    : out_(out), err_(err) {}
+CommandLineParser::CommandLineParser(std::ostream& out) : out_(out) {}
 
 void CommandLineParser::printUsage() const {
     out_ << R"(leakhunter -- lightweight memory leak detector for C++ applications

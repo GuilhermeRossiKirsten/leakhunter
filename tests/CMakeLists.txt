@@ -216,6 +216,47 @@ if(LEAKHUNTER_BUILD_AGENT AND LEAKHUNTER_BUILD_EXAMPLES)
                    "EXPECT_EXIT=1")
     endif()
 
+    # A position-dependent executable. The symbolizer needs the absolute address
+    # rather than the module offset, and until this target existed the retry that
+    # handles it was never exercised -- every binary on the test machine was PIE.
+    leakhunter_add_integration_test(integration_nopie simple_leak_nopie
+        EXPECT "EXPECT_LEAK_COUNT=1"
+               "EXPECT_LEAKED_BYTES=1024"
+               "EXPECT_FUNCTION=allocateBuffer"
+               "EXPECT_SNIPPET_CONTAINS=malloc")
+
+    # Stripping removes the names. Detection must not depend on them, and the
+    # report must say so rather than inventing one.
+    add_test(NAME integration_stripped
+        COMMAND "${CMAKE_COMMAND}"
+                "-DLEAKHUNTER=$<TARGET_FILE:leakhunter>"
+                "-DTARGET_BIN=$<TARGET_FILE:multiple_leaks>"
+                "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/reports/integration_stripped"
+                "-DSTRIP_TOOL=${CMAKE_STRIP}"
+                "-DEXPECT_LEAK_COUNT=111"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/integration/run_stripped.cmake")
+    set_tests_properties(integration_stripped PROPERTIES LABELS "integration" TIMEOUT 120)
+
+    # A target that never exits on its own. Stopping it must still yield a
+    # report -- before this existed, Ctrl-C killed the host, orphaned the target
+    # and wrote nothing, which is the one case a leak detector is most wanted for.
+    if(TARGET service)
+        foreach(stopSignal INT TERM)
+            string(TOLOWER "${stopSignal}" stopSuffix)
+            add_test(NAME integration_longrunning_${stopSuffix}
+                COMMAND "${CMAKE_COMMAND}"
+                        "-DLEAKHUNTER=$<TARGET_FILE:leakhunter>"
+                        "-DTARGET_BIN=$<TARGET_FILE:service>"
+                        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/reports/longrunning_${stopSuffix}"
+                        "-DSTOP_SIGNAL=${stopSignal}"
+                        "-DRUN_SECONDS=2"
+                        "-DEXPECT_FUNCTION=handleRequest"
+                        -P "${CMAKE_CURRENT_SOURCE_DIR}/integration/run_longrunning.cmake")
+            set_tests_properties(integration_longrunning_${stopSuffix} PROPERTIES
+                LABELS "integration" TIMEOUT 60)
+        endforeach()
+    endif()
+
     # A target killed mid-run never runs the agent's destructor. Without the
     # fatal-signal flush the entire buffered trace is lost, so this guards the
     # case a leak hunter is most often reached for.

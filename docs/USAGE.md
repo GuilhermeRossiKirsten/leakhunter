@@ -245,6 +245,31 @@ commands, which annotate the pull-request diff on the offending line:
 
 No flag needed for that: the useful choice in CI is never the one you remembered to pass.
 
+## Long-running targets
+
+A service does not exit, so **you** end the run. `Ctrl-C` (or `kill` on the leakhunter process)
+stops the target and produces the report for everything it did up to that moment:
+
+```console
+$ leakhunter ./my-daemon
+  ... runs ...
+^C
+[leakhunter info] stopped the target with signal 2 (Interrupt); reporting what it did up to that point
+```
+
+The signal is forwarded to the target so its agent can flush; the normal reporting path then runs.
+**Press it twice to force-quit** — the second signal restores the default handler, so a wedged
+target cannot trap you.
+
+The report marks this: `run.stoppedByRequest` is `true`, and the summary says so in plain language.
+`summary.droppedRecords` will be 1, because the trace genuinely has no end marker — read the two
+together before treating the run as incomplete.
+
+**This is a snapshot, not a trend.** It says what was live when you stopped it, not what is
+*growing*. For that, take two runs of different lengths and compare `summary.leakedBytes`; a site
+that scales with uptime is leaking, one that stays flat is a fixed cost. Sampled growth analysis is
+on the [roadmap](ROADMAP.md).
+
 ## Multi-process targets
 
 **Only the process LeakHunter launches is traced.** A child it `fork()`s is stopped by an atfork

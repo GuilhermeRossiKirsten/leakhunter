@@ -14,6 +14,21 @@ namespace {
 
 constexpr std::size_t kScratchBytes = 2048;
 
+/// Every scratch buffer is published through this before being abandoned.
+///
+/// Without it the allocations here are not observable, and **the compiler is
+/// allowed to delete them** -- C++ explicitly permits eliding allocations.
+/// Clang at -O1 does exactly that: the same source produced 4829 allocations
+/// under GCC and 4329 under Clang, and bug #4 simply did not exist in the Clang
+/// build. LeakHunter reported both correctly; the demo was the thing that was
+/// wrong.
+///
+/// A `volatile` store is an observable side effect, so no compiler may remove
+/// the allocation that feeds it. Real leaking code is observable for ordinary
+/// reasons -- the pointer goes into a container, a struct, a callback -- which
+/// is why the other three defects in this demo need no such help.
+void* volatile g_publishedScratch = nullptr;
+
 /// Indexes one batch. The scratch buffer is allocated per call.
 ///
 /// `noinline` is here for the demonstration, not for the bug. Called from one
@@ -28,6 +43,7 @@ __attribute__((noinline)) std::size_t indexBatch(std::size_t batch) {
     if (scratch == nullptr) {
         return 0;
     }
+    g_publishedScratch = scratch;
 
     std::memset(scratch, static_cast<int>(batch & 0xFF), kScratchBytes);
 
@@ -56,6 +72,7 @@ void indexBatchProperly(std::size_t batch) {
     if (scratch == nullptr) {
         return;
     }
+    g_publishedScratch = scratch;
     std::memset(scratch, static_cast<int>(batch & 0xFF), kScratchBytes);
     std::free(scratch);
 }

@@ -15,11 +15,9 @@ namespace {
 
 leakhunter::Result<Options> parse(std::vector<std::string_view> args) {
     static std::ostringstream out;
-    static std::ostringstream err;
     out.str({});
-    err.str({});
 
-    const CommandLineParser parser(out, err);
+    const CommandLineParser parser(out);
     return parser.parse(args);
 }
 

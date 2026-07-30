@@ -337,7 +337,17 @@ std::string HtmlReportGenerator::render(const analysis::LeakReport& report) {
     }
 
     std::string notices;
-    if (stats.droppedRecords > 0) {
+    if (report.process.stoppedByRequest) {
+        // A service was stopped on purpose. It has an incomplete trace by
+        // definition, and saying "the target may have exited abnormally" about
+        // something the user deliberately ended reads as a malfunction.
+        notices += fmt::format(
+            R"(<div class="notice"><strong>You stopped this run.</strong> The target was still )"
+            R"(running when it received signal {}, so this is everything it did up to that )"
+            R"(moment &mdash; which is the point when the target is a service. Anything )"
+            R"(allocated in the final instant, after the last flush, is not here.</div>)",
+            report.process.terminatingSignal);
+    } else if (stats.droppedRecords > 0) {
         notices += fmt::format(
             R"(<div class="notice"><strong>Partial data.</strong> The agent reported {} dropped record(s); )"
             R"(the target may have exited abnormally. Leak counts are a lower bound.</div>)",
@@ -357,7 +367,7 @@ std::string HtmlReportGenerator::render(const analysis::LeakReport& report) {
             R"(normally not defects; rerun with <code>--include-runtime</code> to list them.</div>)",
             report.runtimeLeakCount, formatBytes(report.runtimeLeakedBytes));
     }
-    if (report.process.terminatingSignal != 0) {
+    if (report.process.terminatingSignal != 0 && !report.process.stoppedByRequest) {
         notices += fmt::format(
             R"(<div class="notice">The target was terminated by signal {}. Allocations made after )"
             R"(the last flush are missing.</div>)",

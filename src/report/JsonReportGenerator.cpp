@@ -83,6 +83,9 @@ json JsonReportGenerator::toJson(const analysis::LeakReport& report) {
         {"generatedAt", report.generatedAtIso8601},
         {"exitCode", report.process.exitCode},
         {"terminatingSignal", report.process.terminatingSignal},
+        // True when LeakHunter stopped the target on the user's behalf, rather
+        // than the target dying on its own. An incomplete trace is expected then.
+        {"stoppedByRequest", report.process.stoppedByRequest},
         {"durationMs", report.process.durationMs},
     };
 

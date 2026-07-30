@@ -44,7 +44,7 @@ Verified output, not an illustration:
 
 | Site | Leaks | Bytes | Threads | Located at |
 |---|---:|---:|---:|---|
-| `indexBatch` | 100 | 200.00 KiB | **4** | `IndexWorker.cpp:27` |
+| `indexBatch` | 100 | 200.00 KiB | **4** | `IndexWorker.cpp:42` |
 | `buildDocument` | 400 | 110.94 KiB | 1 | `DocumentCache.cpp:18` |
 | `duplicateSpan` | 200 | 1.03 KiB | 1 | `RecordParser.cpp:18` |
 
@@ -60,8 +60,8 @@ The summary shows the blamed line, with a caret on the exact column:
 ```
   top leak sites
     200.00 KiB  x100    poc::(anonymous namespace)::indexBatch(unsigned long)
-                        at poc/src/IndexWorker.cpp:27
-                        27 |     auto* scratch = static_cast<unsigned char*>(std::malloc(kScratchBytes));
+                        at poc/src/IndexWorker.cpp:42
+                        42 |     auto* scratch = static_cast<unsigned char*>(std::malloc(kScratchBytes));
                            |                                                            ^
     110.94 KiB  x400    poc::buildDocument(long, unsigned long)
                         at poc/src/DocumentCache.cpp:18
@@ -82,7 +82,7 @@ Actions annotates onto a pull-request diff:
 
 ```console
 $ leakhunter --diagnostics ./build/poc/docindex
-poc/src/IndexWorker.cpp:27:60: warning: leak: 100 block(s) leaked here, 200.00 KiB in total, by ... [leakhunter:leak]
+poc/src/IndexWorker.cpp:42:60: warning: leak: 100 block(s) leaked here, 200.00 KiB in total, by ... [leakhunter:leak]
 poc/src/DocumentCache.cpp:18:46: warning: leak: 400 block(s) leaked here, 110.94 KiB in total, by ... [leakhunter:leak]
 poc/src/RecordParser.cpp:18:48: warning: leak: 200 block(s) leaked here, 1.03 KiB in total, by ... [leakhunter:leak]
 poc/src/DocumentCache.cpp:67:49: warning: mismatched-free: 8 block(s) allocated with new[] here, released with free() -- undefined behaviour (4.00 KiB affected) [leakhunter:mismatched-free]
@@ -90,6 +90,27 @@ poc/src/DocumentCache.cpp:67:49: warning: mismatched-free: 8 block(s) allocated 
 
 Note the last line: the 8 mismatched frees are one site, so they collapse into one diagnostic with a
 count. Eight identical annotations on one line of a diff would be noise.
+
+### The same numbers under GCC and Clang
+
+Verified with both: **4829 allocations, 700 leaks, 319450 bytes, 3 sites, 8 mismatched frees** —
+identical. Getting there took a fix to the demo, not to the tool.
+
+The first Clang build reported **600** leaks from 4329 allocations. `indexBatch` allocated a scratch
+buffer, filled it, summed it and returned a checksum the caller discarded — so nothing about the
+allocation was observable, and **C++ permits eliding allocations**. Clang at `-O1` deleted all 500
+allocations in that file, leaking and balanced alike. LeakHunter reported what the program actually
+did; bug #4 simply did not exist in that build.
+
+The fix is a `volatile` store of each buffer, which is an observable side effect no compiler may
+remove. Real leaking code is observable for ordinary reasons — the pointer goes into a container, a
+struct, a callback — which is why the other three defects need no such help. It is worth knowing
+about when writing any test for a memory tool: `-Wunused-result` is the compiler warning you.
+
+One difference between the two remains, and it is honest rather than a defect: Clang inlines
+`duplicateSpan`, so under Clang that site is blamed on its caller `parseRecord`. Same file, same
+line, same count — the enclosing function is named because the inlined one no longer has a frame.
+See the note on `noinline` at the end of this file.
 
 ### Reading the numbers
 
@@ -102,7 +123,8 @@ A few of them deserve a note, because they are the parts people query:
   in one group and the location shown is the representative one.
 - **`duplicateSpan` is a `static` function in an anonymous namespace.** It never reaches the dynamic
   symbol table, so `dladdr` cannot see it — only the DWARF pass through `llvm-symbolizer` recovers
-  the name. Most application code looks like this, which is why that pass is on by default.
+  the name. Most application code looks like this, which is why that pass is on by default. (Under
+  Clang it is inlined away and the site is blamed on `parseRecord` instead.)
 - **`threads=4` on the indexer site.** Every allocation carries the kernel thread id that made it,
   so one leaking function spread across a pool shows up as one site, not four unrelated ones.
 - **8 mismatched frees, 0 bytes leaked from them.** Those blocks *were* returned. They are undefined

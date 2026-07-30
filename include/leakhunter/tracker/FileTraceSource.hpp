@@ -23,8 +23,18 @@ public:
 
     [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
 
+    /// Tells the reader that a missing end marker is expected.
+    ///
+    /// A trace normally ends with one; its absence means the target crashed, or
+    /// called _exit(), and that is worth a warning. But when LeakHunter itself
+    /// stopped a still-running service on the user's behalf, an unterminated
+    /// trace is the *designed* outcome, and "the target did not shut down
+    /// cleanly" would describe the user's own Ctrl-C as a malfunction.
+    void expectNoEndMarker(bool expected) noexcept { endMarkerOptional_ = expected; }
+
 private:
     std::filesystem::path path_;
+    bool endMarkerOptional_ = false;
 };
 
 }  // namespace leakhunter::tracker

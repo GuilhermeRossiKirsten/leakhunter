@@ -86,6 +86,40 @@ leakhunter_add_integration_test(integration_my_case my_case
 **Write the absence assertions.** `EXPECT_ABSENT` is what catches false positives, and a leak
 detector with false positives gets switched off.
 
+### Make the allocations observable
+
+This one has bitten twice, in the demo and in a benchmark harness, and it is easy to miss:
+
+```cpp
+for (int i = 0; i < 1000; ++i) { (void)std::malloc(64); }   // may allocate NOTHING
+```
+
+C++ permits eliding allocations, and both GCC and Clang do it. A test program whose allocations are
+not observable can be compiled down to nothing, and the "failure" then looks like a bug in
+LeakHunter rather than in the test. Clang at `-O1` removed 500 allocations from `poc/` this way,
+turning 700 leaks into 600.
+
+Store the pointer somewhere observable — a container, a struct that outlives the call, or a
+`volatile` sink:
+
+```cpp
+void* volatile g_sink = nullptr;
+g_sink = std::malloc(64);
+```
+
+`-Wunused-result` is the compiler telling you in advance.
+
+### Both compilers
+
+Before a release, build with each. They disagree in ways that matter: different inlining changes
+which enclosing function is blamed, and one of them may accept a warning flag the other rejects
+under `-Werror`.
+
+```console
+$ cmake -B build-gcc   -DLEAKHUNTER_WERROR=ON
+$ cmake -B build-clang -DLEAKHUNTER_WERROR=ON -DCMAKE_CXX_COMPILER=clang++
+```
+
 ## Style
 
 `.clang-format` is authoritative — run it before committing.
