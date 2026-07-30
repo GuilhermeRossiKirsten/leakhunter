@@ -15,6 +15,10 @@ leaks, attribute them to a function, and produce a report you can read or feed t
 reports blocks released through the wrong entry point (`new[]` freed with `delete`), because it
 already has the evidence and the check costs nothing.
 
+**Everything at once:** [`./scripts/run_all_pocs.sh`](scripts/run_all_pocs.sh) builds LeakHunter,
+builds all four demonstrations standalone, runs each under the tool, and leaves one timestamped
+report per binary.
+
 **Try it in one command:** [`./poc2/run_demo.sh`](poc2/) starts a service that leaks on every tick,
 stops it, and reports — showing that a process which never exits on its own is still something you
 can point this at. For attribution across a realistic codebase, [`./poc/run_demo.sh`](poc/) builds a small document indexer with four
@@ -155,6 +159,7 @@ The first non-option token ends LeakHunter's own options — `leakhunter ./app -
 | Option | Effect |
 |---|---|
 | `-o, --output <dir>` | Report directory (default `leakhunter-report`) |
+| `--report-name <t>` | Report file stem (default `{target}-{timestamp}`, so runs accumulate) |
 | `--html` / `--json` | Emit only that format (default: both) |
 | `--max-frames <n>` | Frames captured per allocation (default 32, max 128) |
 | `--min-leak-size <n>` | Omit leaks below `<n>` bytes from the listing |
@@ -256,6 +261,7 @@ These are deliberate, and documented rather than hidden:
 |---|---|
 | [poc/](poc/) | **Start here.** A working program with four planted defects, and what LeakHunter says about it |
 | [poc2/](poc2/) | A long-running service: stop it with Ctrl-C and still get the report |
+| [poc3/](poc3/) & [poc4/](poc4/) | The same program in **C++23** and **C++98** — identical findings, because interception happens below the language |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Modules, diagrams, execution flow, design rationale |
 | [USAGE.md](docs/USAGE.md) | Complete CLI reference and recipes |
 | [REPORT_FORMAT.md](docs/REPORT_FORMAT.md) | JSON schema |

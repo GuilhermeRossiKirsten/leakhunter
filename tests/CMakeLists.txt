@@ -257,6 +257,31 @@ if(LEAKHUNTER_BUILD_AGENT AND LEAKHUNTER_BUILD_EXAMPLES)
         endforeach()
     endif()
 
+    # The same program in C++23 and C++98. Interception happens below the
+    # language, so the findings must be identical -- only the standard libraries
+    # around them allocate differently.
+    foreach(dialect IN ITEMS pipeline23 pipeline98)
+        if(TARGET ${dialect})
+            leakhunter_add_integration_test(integration_${dialect} ${dialect}
+                EXPECT "EXPECT_LEAK_COUNT=50"
+                       "EXPECT_LEAKED_BYTES=12800"
+                       "EXPECT_MIN_GROUPS=1"
+                       "EXPECT_FUNCTION=parseSample"
+                       "EXPECT_SNIPPET_CONTAINS=malloc"
+                       "EXPECT_EXIT=1")
+        endif()
+    endforeach()
+
+    # Report names must carry the target and the moment, and two runs must leave
+    # two reports. A fixed name silently loses every run but the last.
+    add_test(NAME integration_report_naming
+        COMMAND "${CMAKE_COMMAND}"
+                "-DLEAKHUNTER=$<TARGET_FILE:leakhunter>"
+                "-DTARGET_BIN=$<TARGET_FILE:simple_leak>"
+                "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/reports/naming"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/integration/run_naming.cmake")
+    set_tests_properties(integration_report_naming PROPERTIES LABELS "integration" TIMEOUT 60)
+
     # A target killed mid-run never runs the agent's destructor. Without the
     # fatal-signal flush the entire buffered trace is lost, so this guards the
     # case a leak hunter is most often reached for.

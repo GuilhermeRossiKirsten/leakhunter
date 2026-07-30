@@ -50,6 +50,11 @@ USAGE
 OPTIONS
     -o, --output <dir>     Directory for the generated reports
                            (default: leakhunter-report)
+        --report-name <t>  Stem for the generated files (default:
+                           "{target}-{timestamp}"). {target} is the monitored
+                           binary's name, {timestamp} is local YYYYMMDD-HHMMSS.
+                           Successive runs accumulate rather than overwrite; pass
+                           a fixed string such as "report" for a stable path.
         --html             Generate report.html only
         --json             Generate report.json only
                            (default: generate both)
@@ -198,6 +203,13 @@ Result<Options> CommandLineParser::parse(std::span<const std::string_view> args)
             auto value = takeValue(token);
             if (!value) return value.error();
             options.sourceRoots.emplace_back(std::string{value.value()});
+        } else if (token == "--report-name") {
+            auto value = takeValue(token);
+            if (!value) return value.error();
+            if (value.value().empty()) {
+                return Error{"--report-name expects a non-empty name"};
+            }
+            options.reportNameTemplate = std::string{value.value()};
         } else if (token == "--diagnostics") {
             options.emitDiagnostics = true;
         } else if (token == "--no-mismatch-check") {

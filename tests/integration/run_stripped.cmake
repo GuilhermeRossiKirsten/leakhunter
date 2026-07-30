@@ -27,7 +27,7 @@ if(NOT stripResult EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${LEAKHUNTER}" --json --output "${OUTPUT}" "${stripped}"
+    COMMAND "${LEAKHUNTER}" --json --report-name report --output "${OUTPUT}" "${stripped}"
     RESULT_VARIABLE exitCode
     OUTPUT_VARIABLE standardOutput
     ERROR_VARIABLE standardError)

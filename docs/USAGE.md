@@ -23,11 +23,34 @@ $ leakhunter --verbose -- ./app --verbose   # one each, unambiguous
 | Option | Default | Effect |
 |---|---|---|
 | `-o, --output <dir>` | `leakhunter-report` | Directory for the reports; created if missing |
+| `--report-name <t>` | `{target}-{timestamp}` | Stem for the generated files; `{target}` and `{timestamp}` expand |
 | `--html` | — | Generate `report.html` only |
 | `--json` | — | Generate `report.json` only |
 | *(neither)* | ✔ | Generate both |
 
 Passing both `--html` and `--json` is the same as passing neither.
+
+**Reports accumulate; they do not overwrite.** The default name carries the binary and the local
+time, so running several targets into one directory leaves one report each:
+
+```console
+$ ls leakhunter-report/
+docindex-20260730-104221.html    pipeline23-20260730-104226.html
+docindex-20260730-104221.json    pipeline23-20260730-104226.json
+```
+
+Pass a fixed stem when you want a stable path — a CI job publishing one artifact, or a script that
+reads the result:
+
+```console
+$ leakhunter --report-name report --json ./app     # always leakhunter-report/report.json
+```
+
+The timestamp has one-second resolution, so two runs of the same binary inside the same second do
+collide. Use `--output` per run if that matters.
+
+Nothing is deleted. The one file that *is* removed on exit is the intermediate binary trace, which
+is a working artifact rather than a result; `--keep-trace` keeps it.
 
 ### Capture
 

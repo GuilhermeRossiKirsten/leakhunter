@@ -37,7 +37,7 @@ endif()
 
 file(REMOVE_RECURSE "${OUTPUT}")
 
-set(command "${LEAKHUNTER}" --json --output "${OUTPUT}")
+set(command "${LEAKHUNTER}" --json --report-name report --output "${OUTPUT}")
 if(EXTRA_ARGS)
     list(APPEND command ${EXTRA_ARGS})
 endif()

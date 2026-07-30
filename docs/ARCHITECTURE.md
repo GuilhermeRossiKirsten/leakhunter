@@ -568,6 +568,8 @@ LeakHunter/
 ├── examples/                   # one program per leak shape
 ├── poc/                        # docindex: a realistic demo with four planted defects
 ├── poc2/                       # service: a long-running target you stop by hand
+├── poc3/ poc4/                 # the same program in C++23 and C++98, side by side
+├── scripts/run_all_pocs.sh     # build everything, run everything, keep every report
 └── docs/
 ```
 
@@ -605,6 +607,7 @@ had to be guarded), and Clang's `-Wunused-private-field` found a dead member GCC
 | `poc/docindex` snippets | the blamed line read back from disk contains `malloc(kScratchBytes)` — the whole chain, from interception through DWARF to the file |
 | `poc/docindex --no-source-snippets` | zero snippets, everything else identical |
 | `poc2/service` stopped with SIGINT / SIGTERM | a target that never exits still reports; `run.stoppedByRequest` set, no orphan left behind |
+| `poc3/pipeline23` and `poc4/pipeline98` | the same program in C++23 and C++98 must yield the same 50 leaks and 12800 bytes — interception sits below the language |
 | `simple_leak_nopie` | a position-dependent executable still symbolises (the absolute-address retry) |
 | `multiple_leaks`, stripped | all 111 leaks still found, every site honest about having no name |
 | `multiple_leaks --suppressions` | 111 leaks become 11; the suppressed site is absent and the other two remain |

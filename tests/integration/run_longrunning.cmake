@@ -35,7 +35,7 @@ endif()
 # Start it, let it run, stop it, wait. The bounded wait matters: a regression
 # that leaves the host blocked must fail the test rather than hang the suite.
 set(script "
-'${LEAKHUNTER}' --json --output '${OUTPUT}' '${TARGET_BIN}' > '${OUTPUT}.log' 2>&1 &
+'${LEAKHUNTER}' --json --report-name report --output '${OUTPUT}' '${TARGET_BIN}' > '${OUTPUT}.log' 2>&1 &
 pid=$!
 sleep ${RUN_SECONDS}
 kill -${STOP_SIGNAL} $pid 2>/dev/null

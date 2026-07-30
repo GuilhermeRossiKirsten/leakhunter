@@ -6,6 +6,10 @@
 #include <string>
 #include <vector>
 
+#include <chrono>
+#include <ctime>
+#include <utility>
+
 #include <fmt/format.h>
 
 #include "leakhunter/analysis/LeakAnalyzer.hpp"
@@ -27,6 +31,64 @@
 namespace leakhunter::app {
 namespace fs = std::filesystem;
 namespace {
+
+/// Keeps a name usable as a filename on any of the platforms this may reach.
+[[nodiscard]] std::string sanitiseForFilename(std::string_view text) {
+    std::string safe;
+    safe.reserve(text.size());
+    for (const char character : text) {
+        const bool acceptable = (character >= 'a' && character <= 'z') ||
+                                (character >= 'A' && character <= 'Z') ||
+                                (character >= '0' && character <= '9') || character == '.' ||
+                                character == '-' || character == '_';
+        safe.push_back(acceptable ? character : '_');
+    }
+    return safe;
+}
+
+/// Local time, not UTC: these names are read by a person looking at a directory
+/// listing, and "why is this file stamped three hours ago" is a bad first
+/// question. The trace's own timestamps stay monotonic and unaffected.
+[[nodiscard]] std::string filenameTimestamp() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t seconds = std::chrono::system_clock::to_time_t(now);
+
+    std::tm local{};
+#if defined(_WIN32)
+    localtime_s(&local, &seconds);
+#else
+    localtime_r(&seconds, &local);
+#endif
+
+    return fmt::format("{:04}{:02}{:02}-{:02}{:02}{:02}", local.tm_year + 1900, local.tm_mon + 1,
+                       local.tm_mday, local.tm_hour, local.tm_min, local.tm_sec);
+}
+
+/// Expands `{target}` and `{timestamp}` in a report-name template.
+[[nodiscard]] std::string expandReportName(const std::string& nameTemplate,
+                                           const std::vector<std::string>& command) {
+    std::string target =
+        command.empty() ? std::string{} : fs::path{command.front()}.filename().string();
+    if (target.empty()) {
+        target = "target";
+    }
+
+    std::string expanded = nameTemplate;
+    for (const auto& [token, value] :
+         {std::pair{std::string_view{"{target}"}, sanitiseForFilename(target)},
+          std::pair{std::string_view{"{timestamp}"}, filenameTimestamp()}}) {
+        std::string::size_type at = 0;
+        while ((at = expanded.find(token, at)) != std::string::npos) {
+            expanded.replace(at, token.size(), value);
+            at += value.size();
+        }
+    }
+
+    // A template of only placeholders that all expanded to nothing, or a user
+    // template of punctuation, must not produce a dotfile or an empty name.
+    const std::string safe = sanitiseForFilename(expanded);
+    return safe.empty() || safe.front() == '.' ? "report" : safe;
+}
 
 [[nodiscard]] std::string joinCommand(const std::vector<std::string>& command) {
     std::string joined;
@@ -67,6 +129,7 @@ private:
     std::ostream& out_;
     std::ostream& err_;
     std::optional<analysis::LeakReport> report_;
+    std::vector<fs::path> writtenReports_;
 };
 
 Result<fs::path> Application::Impl::resolveAgent(const cli::Options& options) const {
@@ -286,11 +349,18 @@ Status Application::Impl::writeReports(const cli::Options& options,
         generators.push_back(std::make_unique<report::HtmlReportGenerator>());
     }
 
+    const std::string stem = expandReportName(options.reportNameTemplate, options.targetCommand);
+
+    writtenReports_.clear();
     for (const auto& generator : generators) {
-        const fs::path path = options.outputDirectory / generator->defaultFileName();
+        // The stem is ours, the extension is the format's.
+        const fs::path extension = fs::path{generator->defaultFileName()}.extension();
+        const fs::path path = options.outputDirectory / (stem + extension.string());
+
         if (Status status = generator->generate(report, path); !status) {
             return status;
         }
+        writtenReports_.push_back(path);
     }
     return {};
 }
@@ -421,13 +491,11 @@ void Application::Impl::printSummary(const analysis::LeakReport& report,
         out_ << "\n";
     }
 
-    if (options.emitJson) {
-        out_ << fmt::format("  report: {}\n",
-                            (options.outputDirectory / "report.json").string());
-    }
-    if (options.emitHtml) {
-        out_ << fmt::format("  report: {}\n",
-                            (options.outputDirectory / "report.html").string());
+    // Print what was actually written, rather than rebuilding the names here.
+    // Two implementations of the naming rule would drift, and the first symptom
+    // would be the tool printing a path that does not exist.
+    for (const fs::path& written : writtenReports_) {
+        out_ << fmt::format("  report: {}\n", written.string());
     }
     out_ << "\n";
 }

@@ -25,6 +25,14 @@ struct Options {
     bool emitHtml = true;
     bool emitJson = true;
 
+    /// Stem of the generated report files; the extension comes from the format.
+    ///
+    /// `{target}` expands to the monitored binary's name and `{timestamp}` to
+    /// local `YYYYMMDD-HHMMSS`, so successive runs accumulate side by side
+    /// instead of each overwriting the last. Set it to a fixed string when you
+    /// want a stable path -- a CI job publishing one artifact, for instance.
+    std::string reportNameTemplate{"{target}-{timestamp}"};
+
     /// Frames captured per allocation. Lower is faster, higher is more context.
     std::uint16_t maxFrames = 32;
 

@@ -202,6 +202,22 @@ LH_TEST(Cli, diagnostics_is_opt_in) {
     LH_CHECK(parse({"--diagnostics", "./app"}).value().emitDiagnostics);
 }
 
+LH_TEST(Cli, report_names_carry_the_target_and_a_timestamp_by_default) {
+    // Successive runs must accumulate rather than overwrite; that is the whole
+    // reason the default is not a fixed "report".
+    LH_CHECK_EQ(parse({"./app"}).value().reportNameTemplate,
+                std::string{"{target}-{timestamp}"});
+}
+
+LH_TEST(Cli, report_name_can_be_pinned) {
+    LH_CHECK_EQ(parse({"--report-name", "report", "./app"}).value().reportNameTemplate,
+                std::string{"report"});
+    LH_CHECK_EQ(parse({"--report-name", "{target}", "./app"}).value().reportNameTemplate,
+                std::string{"{target}"});
+    LH_CHECK(!parse({"--report-name"}).hasValue());
+    LH_CHECK(!parse({"--report-name", "", "./app"}).hasValue());
+}
+
 LH_TEST(Cli, trace_file_implies_keeping_it) {
     auto result = parse({"--trace-file", "/tmp/x.lhtrace", "./app"});
     LH_CHECK(result.hasValue());
