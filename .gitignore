@@ -1,0 +1,22 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+install/
+compile_commands.json
+
+# LeakHunter output
+leakhunter-report/
+reports/
+*.lhtrace
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db

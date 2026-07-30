@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LeakHunter report &ndash; ./build/examples/mismatched_free</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-alt: #f0f2f5;
+  --border: #d9dde3;
+  --text: #1b1f24;
+  --muted: #5a6270;
+  --accent: #2f6feb;
+  --danger: #c8372d;
+  --warn: #b7791f;
+  --ok: #1a7f45;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216;
+    --surface: #171b21;
+    --surface-alt: #1e242c;
+    --border: #2b333d;
+    --text: #e6e9ee;
+    --muted: #9aa4b2;
+    --accent: #5b8cff;
+    --danger: #f0776a;
+    --warn: #e0b23c;
+    --ok: #4bbd7c;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 2rem 1.25rem 4rem;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.wrap { max-width: 1180px; margin: 0 auto; }
+header { margin-bottom: 1.75rem; }
+h1 { margin: 0 0 .35rem; font-size: 1.6rem; letter-spacing: -.02em; }
+h2 { margin: 2.25rem 0 .85rem; font-size: 1.15rem; }
+.sub { color: var(--muted); font-size: .9rem; }
+.sub code { font-family: var(--mono); background: var(--surface-alt); padding: .12rem .35rem; border-radius: 4px; }
+.verdict { display: inline-block; margin-top: .9rem; padding: .35rem .8rem; border-radius: 999px; font-weight: 600; font-size: .85rem; }
+.verdict.bad { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+.verdict.good { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .85rem; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: .9rem 1rem; }
+.card .label { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+.card .value { font-size: 1.4rem; font-weight: 650; margin-top: .3rem; font-variant-numeric: tabular-nums; }
+.card .value.danger { color: var(--danger); }
+.card .hint { color: var(--muted); font-size: .78rem; margin-top: .15rem; }
+.notice { margin-top: 1rem; padding: .7rem .9rem; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border)); background: color-mix(in srgb, var(--warn) 10%, transparent); font-size: .87rem; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 720px; }
+th, td { text-align: left; padding: .6rem .85rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { background: var(--surface-alt); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; }
+th[aria-sort="descending"]::after { content: " \25BC"; font-size: .7em; }
+th[aria-sort="ascending"]::after { content: " \25B2"; font-size: .7em; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr.group-row { cursor: pointer; }
+tbody tr.group-row:hover { background: var(--surface-alt); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fn { font-family: var(--mono); font-size: .87rem; word-break: break-all; }
+.loc { color: var(--muted); font-size: .8rem; font-family: var(--mono); word-break: break-all; }
+.badge { display: inline-block; padding: .08rem .4rem; border-radius: 4px; background: var(--surface-alt); border: 1px solid var(--border); font-size: .72rem; color: var(--muted); font-family: var(--mono); }
+tr.detail > td { padding: 0; background: var(--surface-alt); }
+tr.detail.hidden { display: none; }
+section.hidden { display: none; }
+.ub { border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border)); background: color-mix(in srgb, var(--danger) 8%, transparent); border-radius: 10px; padding: .8rem 1rem; margin-bottom: .7rem; }
+.ub .what { font-weight: 600; color: var(--danger); font-size: .9rem; }
+.ub .meta { color: var(--muted); font-size: .8rem; margin: .15rem 0 .4rem; font-family: var(--mono); }
+ol.stack { margin: 0; padding: .75rem 1rem .9rem 2.6rem; font-family: var(--mono); font-size: .82rem; }
+ol.stack li { padding: .12rem 0; }
+ol.stack li.blamed { color: var(--danger); font-weight: 600; }
+ol.stack .where { color: var(--muted); }
+.toolbar { display: flex; gap: .6rem; align-items: center; margin-bottom: .7rem; flex-wrap: wrap; }
+input[type="search"] { flex: 1 1 260px; padding: .45rem .7rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: .88rem; }
+.empty { padding: 2.5rem 1rem; text-align: center; color: var(--muted); }
+footer { margin-top: 3rem; color: var(--muted); font-size: .8rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>LeakHunter report</h1>
+    <div class="sub">
+      <code>./build/examples/mismatched_free</code> &middot; pid 2693 &middot; exit 0 &middot; 2026-07-29T23:41:19Z
+    </div>
+    <span class="verdict bad">4 mismatched frees &mdash; undefined behaviour</span>
+  </header>
+
+  <section class="cards">
+    <div class="card"><div class="label">Total allocations</div><div class="value">8</div>
+      <div class="hint">6.30 KiB requested</div></div>
+    <div class="card"><div class="label">Total freed</div><div class="value">7</div>
+      <div class="hint">2.30 KiB released</div></div>
+    <div class="card"><div class="label">Memory leaked</div><div class="value danger">0 B</div>
+      <div class="hint">0.0% of all bytes</div></div>
+    <div class="card"><div class="label">Leaks</div><div class="value">0</div>
+      <div class="hint">0 distinct site(s)</div></div>
+    <div class="card"><div class="label">Peak live</div><div class="value">4.00 KiB</div>
+      <div class="hint">high-water mark</div></div>
+  </section>
+  <div class="notice"><strong>1 runtime block(s)</strong> totalling 4.00 KiB were still live at exit but were requested from inside libc or the dynamic loader &mdash; stdio buffers, locale tables and similar. These are released by the OS and are normally not defects; rerun with <code>--include-runtime</code> to list them.</div>
+
+  <h2>Leaks by function</h2>
+  <div class="toolbar">
+    <input id="filter" type="search" placeholder="Filter by function, module or file&hellip;">
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th data-key="totalBytes" aria-sort="descending">Bytes leaked</th>
+          <th data-key="count">Leaks</th>
+          <th data-key="function">Function</th>
+          <th data-key="threadCount">Threads</th>
+          <th data-key="frameCount">Stack</th>
+        </tr>
+      </thead>
+      <tbody id="groups-body"><tr><td colspan="5" class="empty">Nothing leaked. </td></tr></tbody>
+    </table>
+  </div>
+
+  <section id="mismatch-section" class="hidden">
+    <h2>Mismatched frees</h2>
+    <p class="sub">Each block below was returned through the wrong entry point. The memory was
+    released, so it is not a leak &mdash; it is undefined behaviour, and it tends to keep working
+    until an allocator change or a new destructor turns it into a crash. The stack shown is where
+    the block was <em>allocated</em>.</p>
+    <div id="mismatch-body"></div>
+  </section>
+
+  <footer>
+    Generated by leakhunter 0.1.0 &middot; click a row to expand its stack trace &middot;
+    the highlighted frame is the one blamed for the allocation.
+  </footer>
+</div>
+<script id="leakhunter-data" type="application/json">{"groups":[],"leaks":[],"mismatchedFrees":[{"address":"0x64b22ea332b0","allocatedBy":"operator new","allocatedOnThread":2693,"description":"allocated with new, released with free()","releasedBy":"free","releasedOnThread":2693,"responsibleFrame":0,"responsibleFunction":"(anonymous namespace)::newThenFree()","size":16,"stackTrace":[{"address":"0x64b20a11423e","displayName":"(anonymous namespace)::newThenFree()","file":"/home/dev/myapp/src/mismatched_free.cpp","function":"(anonymous namespace)::newThenFree()","line":32,"module":"./build/examples/mismatched_free","moduleOffset":"0x123e","preciseName":true,"resolved":true,"symbolOffset":"0x0"},{"address":"0x64b20a1143df","displayName":"main","file":"/home/dev/myapp/src/mismatched_free.cpp","function":"main","line":80,"module":"./build/examples/mismatched_free","moduleOffset":"0x13df","preciseName":true,"resolved":true,"symbolOffset":"0x0"},{"address":"0x70a7f582a1c9","displayName":"__libc_init_first","function":"__libc_init_first","module":"/lib/x86_64-linux-gnu/libc.so.6","moduleOffset":"0x2a1c9","preciseName":false,"resolved":true,"symbolOffset":"0x0"},{"address":"0x70a7f582a28a","displayName":"__libc_start_main+0x8a","function":"__libc_start_main","module":"/lib/x86_64-linux-gnu/libc.so.6","moduleOffset":"0x2a28a","preciseName":false,"resolved":true,"symbolOffset":"0x8a"},{"address":"0x64b20a114164","displayName":"_start","function":"_start","module":"./build/examples/mismatched_free","moduleOffset":"0x1164","preciseName":false,"resolved":true,"symbolOffset":"0x0"}],"timestampNs":151690},{"address":"0x64b22ea33360","allocatedBy":"operator new[]","allocatedOnThread":2693,"description":"allocated with new[], released with delete","releasedBy":"operator delete","releasedOnThread":2693,"responsibleFrame":0,"responsibleFunction":"(anonymous namespace)::newArrayThenScalarDelete()","size":1024,"stackTrace":[{"address":"0x64b20a11429c","displayName":"(anonymous namespace)::newArrayThenScalarDelete()","file":"/home/dev/myapp/src/mismatched_free.cpp","function":"(anonymous namespace)::newArrayThenScalarDelete()","line":41,"module":"./build/examples/mismatched_free","moduleOffset":"0x129c","preciseName":true,"resolved":true,"symbolOffset":"0x0"},{"address":"0x64b20a1143e4","displayName":"main","file":"/home/dev/myapp/src/mismatched_free.cpp","function":"main","line":81,"module":"./build/examples/mismatched_free","moduleOffset":"0x13e4","preciseName":true,"resolved":true,"symbolOffset":"0x0"},{"address":"0x70a7f582a1c9","displayName":"__libc_init_first","function":"__libc_init_first","module":"/lib/x86_64-linux-gnu/libc.so.6","moduleOffset":"0x2a1c9","preciseName":false,"resolved":true,"symbolOffset":"0x0"},{"address":"0x70a7f582a28a","displayName":"__libc_start_main+0x8a","function":"__libc_start_main","module":"/lib/x86_64-linux-gnu/libc.so.6","moduleOffset":"0x2a28a","preciseName":false,"resolved":true,"symbolOffset":"0x8a"},{"address":"0x64b20a114164","displayName":"_start","function":"_start","module":"./build/examples/mismatched_free","moduleOffset":"0x1164","preciseName":false,"resolved":true,"symbolOffset":"0x0"}],"timestampNs":155915},{"address":"0x64b22ea33360","allocatedBy":"operator new[]","allocatedOnThread":2693,"description":"allocated with new[], released with free()","releasedBy":"free","releasedOnThread":2693,"responsibleFrame":0,"responsibleFunction":"(anonymous namespace)::newArrayThenFree()","size":1024,"stackTrace":[{"address":"0x64b20a1142df","displayName":"(anonymous namespace)::newArrayThenFree()","file":"/home/dev/myapp/src/mismatched_free.cpp","function":"(anonymous namespace)::newArrayThenFree()","line":48,"module":"./build/examples/mismatched_free","moduleOffset":"0x12df","preciseName":true,"resolved":true,"symbolOffset":"0x0"},{"address":"0x64b20a1143e9","displayName":"main","file":"/home/dev/myapp/src/mismatched_free.cpp","function":"main","line":82,"module":"./build/examples/mismatched_free","moduleOffset":"0x13e9","preciseName":true,"resolved":true,"symbolOffset":"0x0"},{"address":"0x70a7f582a1c9","displayName":"__libc_init_first","function":"__libc_init_first","module":"/lib/x86_64-linux-gnu/libc.so.6","moduleOffset":"0x2a1c9","preciseName":false,"resolved":true,"symbolOffset":"0x0"},{"address":"0x70a7f582a28a","displayName":"__libc_start_main+0x8a","function":"__libc_start_main","module":"/lib/x86_64-linux-gnu/libc.so.6","moduleOffset":"0x2a28a","preciseName":false,"resolved":true,"symbolOffset":"0x8a"},{"address":"0x64b20a114164","displayName":"_start","function":"_start","module":"./build/examples/mismatched_free","moduleOffset":"0x1164","preciseName":false,"resolved":true,"symbolOffset":"0x0"}],"timestampNs":172697},{"address":"0x64b22ea332b0","allocatedBy":"malloc","allocatedOnThread":2693,"description":"allocated with malloc(), released with delete","releasedBy":"operator delete","releasedOnThread":2693,"responsibleFrame":0,"responsibleFunction":"(anonymous namespace)::mallocThenDelete()","size":16,"stackTrace":[{"address":"0x64b20a114312","displayName":"(anonymous namespace)::mallocThenDelete()","file":"/home/dev/myapp/src/mismatched_free.cpp","function":"(anonymous namespace)::mallocThenDelete()","line":55,"module":"./build/examples/mismatched_free","moduleOffset":"0x1312","preciseName":true,"resolved":true,"symbolOffset":"0x0"},{"address":"0x64b20a1143ee","displayName":"main","file":"/home/dev/myapp/src/mismatched_free.cpp","function":"main","line":83,"module":"./build/examples/mismatched_free","moduleOffset":"0x13ee","preciseName":true,"resolved":true,"symbolOffset":"0x0"},{"address":"0x70a7f582a1c9","displayName":"__libc_init_first","function":"__libc_init_first","module":"/lib/x86_64-linux-gnu/libc.so.6","moduleOffset":"0x2a1c9","preciseName":false,"resolved":true,"symbolOffset":"0x0"},{"address":"0x70a7f582a28a","displayName":"__libc_start_main+0x8a","function":"__libc_start_main","module":"/lib/x86_64-linux-gnu/libc.so.6","moduleOffset":"0x2a28a","preciseName":false,"resolved":true,"symbolOffset":"0x8a"},{"address":"0x64b20a114164","displayName":"_start","function":"_start","module":"./build/examples/mismatched_free","moduleOffset":"0x1164","preciseName":false,"resolved":true,"symbolOffset":"0x0"}],"timestampNs":189976}],"run":{"command":"./build/examples/mismatched_free","durationMs":2,"exitCode":0,"generatedAt":"2026-07-29T23:41:19Z","pid":2693,"terminatingSignal":0},"schemaVersion":2,"summary":{"clean":false,"droppedRecords":0,"leakCount":0,"leakGroups":0,"leakedBytes":0,"mismatchDetection":"active","mismatchedFreeCount":4,"mismatchesSuppressedByRules":0,"peakLiveBytes":4096,"runtimeLeakCount":1,"runtimeLeakedBytes":4096,"suppressedByRules":0,"suppressedByRulesBytes":0,"suppressedBytes":0,"suppressedLeaks":0,"suppressedMismatches":0,"totalAllocations":8,"totalBytesAllocated":6448,"totalBytesFreed":2352,"totalDeallocations":7,"truncatedTraces":0,"untrackedFrees":0,"unusedSuppressionRules":0},"suppressions":{"applied":[],"unused":[]},"tool":{"name":"leakhunter","version":"0.1.0"}}</script>
+<script>
+(function () {
+  const data = JSON.parse(document.getElementById('leakhunter-data').textContent);
+  const groups = data.groups || [];
+  const leaks = data.leaks || [];
+
+  const bytes = (n) => {
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let value = Number(n), unit = 0;
+    while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+    return unit === 0 ? value + ' B' : value.toFixed(2) + ' ' + units[unit];
+  };
+  const escapeHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  const frameHtml = (frame, blamed) => {
+    const name = escapeHtml(frame.displayName || frame.function || '??');
+    const where = frame.file
+      ? escapeHtml(frame.file) + ':' + frame.line
+      : escapeHtml(frame.module || '') + '+' + escapeHtml(frame.moduleOffset || '');
+    return '<li class="' + (blamed ? 'blamed' : '') + '">' + name +
+           ' <span class="where">' + where + '</span></li>';
+  };
+
+  const stackHtml = (trace, blamedIndex) =>
+    '<ol class="stack">' +
+    trace.map((f, i) => frameHtml(f, i === blamedIndex)).join('') +
+    '</ol>';
+
+  const tbody = document.getElementById('groups-body');
+  let sortKey = 'totalBytes';
+  let sortDir = -1;
+  let filter = '';
+
+  // The "Stack" column sorts by depth, which is not a field of the report.
+  // Deriving it once keeps the sort comparator uniform.
+  groups.forEach((g) => { g.frameCount = (g.stackTrace || []).length; });
+
+  function render() {
+    const needle = filter.trim().toLowerCase();
+
+    if (groups.length === 0) {
+      tbody.innerHTML =
+        '<tr><td colspan="5" class="empty">No leaks detected.</td></tr>';
+      return;
+    }
+
+    const rows = groups
+      .map((group, index) => ({ group, index }))
+      .filter(({ group }) => !needle ||
+        (group.function + ' ' + group.module + ' ' + group.location).toLowerCase().includes(needle))
+      .sort((a, b) => {
+        const x = a.group[sortKey], y = b.group[sortKey];
+        if (typeof x === 'string') return sortDir * x.localeCompare(y);
+        return sortDir * (x - y);
+      });
+
+    if (rows.length === 0) {
+      tbody.innerHTML =
+        '<tr><td colspan="5" class="empty">No leak site matches that filter.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = rows.map(({ group, index }) => {
+      const blamed = group.blamedFrame == null ? -1 : group.blamedFrame;
+      const first = group.leakIndices && group.leakIndices.length
+        ? leaks[group.leakIndices[0]] : null;
+      const threads = first ? first.threadId : '-';
+      return '' +
+        '<tr class="group-row" data-target="detail-' + index + '">' +
+          '<td class="num">' + bytes(group.totalBytes) + '</td>' +
+          '<td class="num">' + group.count + '</td>' +
+          '<td><div class="fn">' + escapeHtml(group.function) + '</div>' +
+            (group.location ? '<div class="loc">' + escapeHtml(group.location) + '</div>' :
+              '<div class="loc">' + escapeHtml(group.module) + '</div>') + '</td>' +
+          '<td class="num"><span class="badge">' + threads +
+            (group.threadCount > 1 ? ' +' + (group.threadCount - 1) : '') + '</span></td>' +
+          '<td class="num">' + group.frameCount + ' frames</td>' +
+        '</tr>' +
+        '<tr class="detail hidden" id="detail-' + index + '"><td colspan="5">' +
+          stackHtml(group.stackTrace || [], blamed) +
+        '</td></tr>';
+    }).join('');
+  }
+
+  tbody.addEventListener('click', (event) => {
+    const row = event.target.closest('tr.group-row');
+    if (!row) return;
+    const detail = document.getElementById(row.dataset.target);
+    if (detail) detail.classList.toggle('hidden');
+  });
+
+  document.querySelectorAll('th[data-key]').forEach((header) => {
+    header.addEventListener('click', () => {
+      const key = header.dataset.key;
+      sortDir = key === sortKey ? -sortDir : -1;
+      sortKey = key;
+      document.querySelectorAll('th[data-key]').forEach((h) => h.removeAttribute('aria-sort'));
+      header.setAttribute('aria-sort', sortDir === -1 ? 'descending' : 'ascending');
+      render();
+    });
+  });
+
+  const search = document.getElementById('filter');
+  search.addEventListener('input', () => { filter = search.value; render(); });
+
+  render();
+
+  // Mismatched frees. Rendered from the same embedded data so the stack markup
+  // stays identical to the leak table's; the whole section stays hidden when
+  // the run is clean, which is the common case.
+  const mismatches = data.mismatchedFrees || [];
+  if (mismatches.length > 0) {
+    const section = document.getElementById('mismatch-section');
+    section.classList.remove('hidden');
+    document.getElementById('mismatch-body').innerHTML = mismatches.map((m) => {
+      const blamed = m.responsibleFrame == null ? -1 : m.responsibleFrame;
+      const threads = m.allocatedOnThread === m.releasedOnThread
+        ? 'thread ' + m.allocatedOnThread
+        : 'allocated on thread ' + m.allocatedOnThread + ', released on ' + m.releasedOnThread;
+      return '' +
+        '<div class="ub">' +
+          '<div class="what">' + escapeHtml(m.description) + '</div>' +
+          '<div class="meta">' + bytes(m.size) + ' at ' + escapeHtml(m.address) +
+            ' &middot; ' + escapeHtml(threads) + '</div>' +
+          stackHtml(m.stackTrace || [], blamed) +
+        '</div>';
+    }).join('');
+  }
+})();
+</script>
+</body>
+</html>

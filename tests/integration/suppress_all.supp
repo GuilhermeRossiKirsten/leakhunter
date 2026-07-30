@@ -1,0 +1,9 @@
+# Suppresses everything the target leaks, to prove that a suppression file can
+# turn a failing run into a passing one -- and that the suppressed leaks are
+# still counted in summary.suppressedByRules rather than vanishing.
+#
+# Note how broad this is. Matching the target's own module means "anything whose
+# stack passes through this binary", which is every allocation the program made,
+# including the ones libc made on its behalf. That is the intended reach of a
+# `stack:` rule and the reason to prefer `function:` when you can name the site.
+stack:*multiple_leaks*

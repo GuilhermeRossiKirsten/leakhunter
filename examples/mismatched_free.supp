@@ -1,0 +1,10 @@
+# Suppression rules for examples/mismatched_free.cpp.
+#
+# Demonstrates that --suppressions covers mismatched frees, not just leaks.
+# Vendored code with undefined behaviour you cannot fix has to be acceptable,
+# or the tool blocks every build and gets removed from CI.
+#
+# This covers all four sites in the example, so the run exits 0 -- while the
+# report still says, in summary.mismatchesSuppressedByRules and in the HTML
+# notice, exactly what was hidden and by which rule.
+stack:*mismatched_free.cpp*

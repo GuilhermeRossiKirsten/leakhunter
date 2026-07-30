@@ -1,0 +1,6 @@
+# A rule that used to match something and no longer does -- the function was
+# renamed, the library was dropped. It is syntactically fine, which is exactly
+# why it is dangerous: it looks like coverage that is not there.
+#
+# --strict-suppressions turns this into exit code 2.
+function:*aFunctionThatNoLongerExists*

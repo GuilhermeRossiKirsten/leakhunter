@@ -1,0 +1,35 @@
+---
+Language: Cpp
+BasedOnStyle: Google
+
+ColumnLimit: 100
+IndentWidth: 4
+AccessModifierOffset: -4
+TabWidth: 4
+UseTab: Never
+
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: true
+BinPackParameters: true
+BreakBeforeBraces: Attach
+DerivePointerAlignment: false
+PointerAlignment: Left
+SeparateDefinitionBlocks: Always
+SpaceAfterTemplateKeyword: false
+
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Corresponding header is Priority 0 (implicit)
+  - Regex: '^<[a-z_]+>$'            # C++ standard library
+    Priority: 1
+  - Regex: '^<[a-z_/]+\.h>$'        # C / POSIX headers
+    Priority: 2
+  - Regex: '^<(fmt|spdlog|nlohmann)/'
+    Priority: 3
+  - Regex: '^"leakhunter/'
+    Priority: 4
+  - Regex: '.*'
+    Priority: 5

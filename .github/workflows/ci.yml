@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.compiler }} / ${{ matrix.unwinder }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        # Both back-ends are exercised. `builtin` is the default and what
+        # almost everyone runs; `libunwind` is opt-in and must keep working.
+        unwinder: [builtin, libunwind]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build llvm \
+            nlohmann-json3-dev libfmt-dev libspdlog-dev
+          if [ "${{ matrix.unwinder }}" = "libunwind" ]; then
+            sudo apt-get install -y libunwind-dev
+          fi
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            sudo apt-get install -y clang
+            echo "CC=clang"   >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure
+        run: |
+          UNWIND=OFF
+          [ "${{ matrix.unwinder }}" = "libunwind" ] && UNWIND=ON
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DLEAKHUNTER_WERROR=ON \
+            -DLEAKHUNTER_WITH_LIBUNWIND=$UNWIND
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Verify the tool on itself
+        run: |
+          ./build/bin/leakhunter --output /tmp/self ./build/examples/clean_program
+          test -f /tmp/self/report.html
+          test -f /tmp/self/report.json
+
+      - name: Upload reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ matrix.compiler }}-${{ matrix.unwinder }}
+          path: build/tests/reports/
+
+  fetch-only:
+    name: no system dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the bare minimum
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+
+      # A fresh clone with nothing installed must still build: this is the
+      # path a first-time contributor takes.
+      - name: Configure with FetchContent
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLEAKHUNTER_FORCE_FETCH=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: Check formatting
+        run: |
+          find src include tests examples -name '*.cpp' -o -name '*.hpp' \
+            | xargs clang-format --dry-run --Werror

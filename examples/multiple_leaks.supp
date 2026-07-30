@@ -1,0 +1,18 @@
+# Suppression rules for examples/multiple_leaks.cpp.
+#
+# Used by the integration test, and a working example of the format. Each rule
+# is `<scope>:<glob>`; see docs/USAGE.md for the full description.
+#
+# Blank lines and lines starting with # are ignored. A malformed line is a hard
+# error rather than a warning: a typo here silently changes what the tool
+# reports, and finding that out from a green CI run is worse than a startup
+# failure.
+
+# leakSmall() allocates 100 blocks we have decided not to fix. `*` is needed at
+# both ends because the demangled name carries the anonymous namespace and the
+# parameter list: "(anonymous namespace)::leakSmall()".
+function:*leakSmall*
+
+# The other two sites (leakMedium, leakOne) are deliberately NOT suppressed --
+# the test asserts they still appear, because a suppression file that quietly
+# covers more than it names is the failure mode that matters here.

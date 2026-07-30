@@ -1,0 +1,320 @@
+{
+  "groups": [],
+  "leaks": [],
+  "mismatchedFrees": [
+    {
+      "address": "0x64b22ea332b0",
+      "allocatedBy": "operator new",
+      "allocatedOnThread": 2693,
+      "description": "allocated with new, released with free()",
+      "releasedBy": "free",
+      "releasedOnThread": 2693,
+      "responsibleFrame": 0,
+      "responsibleFunction": "(anonymous namespace)::newThenFree()",
+      "size": 16,
+      "stackTrace": [
+        {
+          "address": "0x64b20a11423e",
+          "displayName": "(anonymous namespace)::newThenFree()",
+          "file": "/home/dev/myapp/src/mismatched_free.cpp",
+          "function": "(anonymous namespace)::newThenFree()",
+          "line": 32,
+          "module": "./build/examples/mismatched_free",
+          "moduleOffset": "0x123e",
+          "preciseName": true,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        },
+        {
+          "address": "0x64b20a1143df",
+          "displayName": "main",
+          "file": "/home/dev/myapp/src/mismatched_free.cpp",
+          "function": "main",
+          "line": 80,
+          "module": "./build/examples/mismatched_free",
+          "moduleOffset": "0x13df",
+          "preciseName": true,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        },
+        {
+          "address": "0x70a7f582a1c9",
+          "displayName": "__libc_init_first",
+          "function": "__libc_init_first",
+          "module": "/lib/x86_64-linux-gnu/libc.so.6",
+          "moduleOffset": "0x2a1c9",
+          "preciseName": false,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        },
+        {
+          "address": "0x70a7f582a28a",
+          "displayName": "__libc_start_main+0x8a",
+          "function": "__libc_start_main",
+          "module": "/lib/x86_64-linux-gnu/libc.so.6",
+          "moduleOffset": "0x2a28a",
+          "preciseName": false,
+          "resolved": true,
+          "symbolOffset": "0x8a"
+        },
+        {
+          "address": "0x64b20a114164",
+          "displayName": "_start",
+          "function": "_start",
+          "module": "./build/examples/mismatched_free",
+          "moduleOffset": "0x1164",
+          "preciseName": false,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        }
+      ],
+      "timestampNs": 151690
+    },
+    {
+      "address": "0x64b22ea33360",
+      "allocatedBy": "operator new[]",
+      "allocatedOnThread": 2693,
+      "description": "allocated with new[], released with delete",
+      "releasedBy": "operator delete",
+      "releasedOnThread": 2693,
+      "responsibleFrame": 0,
+      "responsibleFunction": "(anonymous namespace)::newArrayThenScalarDelete()",
+      "size": 1024,
+      "stackTrace": [
+        {
+          "address": "0x64b20a11429c",
+          "displayName": "(anonymous namespace)::newArrayThenScalarDelete()",
+          "file": "/home/dev/myapp/src/mismatched_free.cpp",
+          "function": "(anonymous namespace)::newArrayThenScalarDelete()",
+          "line": 41,
+          "module": "./build/examples/mismatched_free",
+          "moduleOffset": "0x129c",
+          "preciseName": true,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        },
+        {
+          "address": "0x64b20a1143e4",
+          "displayName": "main",
+          "file": "/home/dev/myapp/src/mismatched_free.cpp",
+          "function": "main",
+          "line": 81,
+          "module": "./build/examples/mismatched_free",
+          "moduleOffset": "0x13e4",
+          "preciseName": true,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        },
+        {
+          "address": "0x70a7f582a1c9",
+          "displayName": "__libc_init_first",
+          "function": "__libc_init_first",
+          "module": "/lib/x86_64-linux-gnu/libc.so.6",
+          "moduleOffset": "0x2a1c9",
+          "preciseName": false,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        },
+        {
+          "address": "0x70a7f582a28a",
+          "displayName": "__libc_start_main+0x8a",
+          "function": "__libc_start_main",
+          "module": "/lib/x86_64-linux-gnu/libc.so.6",
+          "moduleOffset": "0x2a28a",
+          "preciseName": false,
+          "resolved": true,
+          "symbolOffset": "0x8a"
+        },
+        {
+          "address": "0x64b20a114164",
+          "displayName": "_start",
+          "function": "_start",
+          "module": "./build/examples/mismatched_free",
+          "moduleOffset": "0x1164",
+          "preciseName": false,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        }
+      ],
+      "timestampNs": 155915
+    },
+    {
+      "address": "0x64b22ea33360",
+      "allocatedBy": "operator new[]",
+      "allocatedOnThread": 2693,
+      "description": "allocated with new[], released with free()",
+      "releasedBy": "free",
+      "releasedOnThread": 2693,
+      "responsibleFrame": 0,
+      "responsibleFunction": "(anonymous namespace)::newArrayThenFree()",
+      "size": 1024,
+      "stackTrace": [
+        {
+          "address": "0x64b20a1142df",
+          "displayName": "(anonymous namespace)::newArrayThenFree()",
+          "file": "/home/dev/myapp/src/mismatched_free.cpp",
+          "function": "(anonymous namespace)::newArrayThenFree()",
+          "line": 48,
+          "module": "./build/examples/mismatched_free",
+          "moduleOffset": "0x12df",
+          "preciseName": true,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        },
+        {
+          "address": "0x64b20a1143e9",
+          "displayName": "main",
+          "file": "/home/dev/myapp/src/mismatched_free.cpp",
+          "function": "main",
+          "line": 82,
+          "module": "./build/examples/mismatched_free",
+          "moduleOffset": "0x13e9",
+          "preciseName": true,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        },
+        {
+          "address": "0x70a7f582a1c9",
+          "displayName": "__libc_init_first",
+          "function": "__libc_init_first",
+          "module": "/lib/x86_64-linux-gnu/libc.so.6",
+          "moduleOffset": "0x2a1c9",
+          "preciseName": false,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        },
+        {
+          "address": "0x70a7f582a28a",
+          "displayName": "__libc_start_main+0x8a",
+          "function": "__libc_start_main",
+          "module": "/lib/x86_64-linux-gnu/libc.so.6",
+          "moduleOffset": "0x2a28a",
+          "preciseName": false,
+          "resolved": true,
+          "symbolOffset": "0x8a"
+        },
+        {
+          "address": "0x64b20a114164",
+          "displayName": "_start",
+          "function": "_start",
+          "module": "./build/examples/mismatched_free",
+          "moduleOffset": "0x1164",
+          "preciseName": false,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        }
+      ],
+      "timestampNs": 172697
+    },
+    {
+      "address": "0x64b22ea332b0",
+      "allocatedBy": "malloc",
+      "allocatedOnThread": 2693,
+      "description": "allocated with malloc(), released with delete",
+      "releasedBy": "operator delete",
+      "releasedOnThread": 2693,
+      "responsibleFrame": 0,
+      "responsibleFunction": "(anonymous namespace)::mallocThenDelete()",
+      "size": 16,
+      "stackTrace": [
+        {
+          "address": "0x64b20a114312",
+          "displayName": "(anonymous namespace)::mallocThenDelete()",
+          "file": "/home/dev/myapp/src/mismatched_free.cpp",
+          "function": "(anonymous namespace)::mallocThenDelete()",
+          "line": 55,
+          "module": "./build/examples/mismatched_free",
+          "moduleOffset": "0x1312",
+          "preciseName": true,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        },
+        {
+          "address": "0x64b20a1143ee",
+          "displayName": "main",
+          "file": "/home/dev/myapp/src/mismatched_free.cpp",
+          "function": "main",
+          "line": 83,
+          "module": "./build/examples/mismatched_free",
+          "moduleOffset": "0x13ee",
+          "preciseName": true,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        },
+        {
+          "address": "0x70a7f582a1c9",
+          "displayName": "__libc_init_first",
+          "function": "__libc_init_first",
+          "module": "/lib/x86_64-linux-gnu/libc.so.6",
+          "moduleOffset": "0x2a1c9",
+          "preciseName": false,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        },
+        {
+          "address": "0x70a7f582a28a",
+          "displayName": "__libc_start_main+0x8a",
+          "function": "__libc_start_main",
+          "module": "/lib/x86_64-linux-gnu/libc.so.6",
+          "moduleOffset": "0x2a28a",
+          "preciseName": false,
+          "resolved": true,
+          "symbolOffset": "0x8a"
+        },
+        {
+          "address": "0x64b20a114164",
+          "displayName": "_start",
+          "function": "_start",
+          "module": "./build/examples/mismatched_free",
+          "moduleOffset": "0x1164",
+          "preciseName": false,
+          "resolved": true,
+          "symbolOffset": "0x0"
+        }
+      ],
+      "timestampNs": 189976
+    }
+  ],
+  "run": {
+    "command": "./build/examples/mismatched_free",
+    "durationMs": 2,
+    "exitCode": 0,
+    "generatedAt": "2026-07-29T23:41:19Z",
+    "pid": 2693,
+    "terminatingSignal": 0
+  },
+  "schemaVersion": 2,
+  "summary": {
+    "clean": false,
+    "droppedRecords": 0,
+    "leakCount": 0,
+    "leakGroups": 0,
+    "leakedBytes": 0,
+    "mismatchDetection": "active",
+    "mismatchedFreeCount": 4,
+    "mismatchesSuppressedByRules": 0,
+    "peakLiveBytes": 4096,
+    "runtimeLeakCount": 1,
+    "runtimeLeakedBytes": 4096,
+    "suppressedByRules": 0,
+    "suppressedByRulesBytes": 0,
+    "suppressedBytes": 0,
+    "suppressedLeaks": 0,
+    "suppressedMismatches": 0,
+    "totalAllocations": 8,
+    "totalBytesAllocated": 6448,
+    "totalBytesFreed": 2352,
+    "totalDeallocations": 7,
+    "truncatedTraces": 0,
+    "untrackedFrees": 0,
+    "unusedSuppressionRules": 0
+  },
+  "suppressions": {
+    "applied": [],
+    "unused": []
+  },
+  "tool": {
+    "name": "leakhunter",
+    "version": "0.1.0"
+  }
+}
