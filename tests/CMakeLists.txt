@@ -153,11 +153,46 @@ if(LEAKHUNTER_BUILD_AGENT AND LEAKHUNTER_BUILD_EXAMPLES)
                "EXPECT_ABSENT=runAsChild"
                "EXPECT_EXIT=1")
 
+    # Two regressions in one target, both of which silently lost data:
+    #   * fork() without exec: the child inherited a copy of the parent's buffer
+    #     and shared its file offset, so its flush corrupted the parent's trace.
+    #     Reported 50 leaks out of 100.
+    #   * the daemonisation idiom closed the agent's trace descriptor, producing
+    #     an empty trace the host blamed on static linking.
+    leakhunter_add_integration_test(integration_forks_and_closes_fds forks_and_closes_fds
+        EXPECT "EXPECT_LEAK_COUNT=400"
+               "EXPECT_LEAKED_BYTES=51200"
+               "EXPECT_FUNCTION=leakBlocks"
+               "EXPECT_EXIT=1")
+
     # A rule that matches nothing is a warning by default and fatal on request.
     leakhunter_add_integration_test(integration_strict_suppressions multiple_leaks
         EXTRA_ARGS "--strict-suppressions;--suppressions;${CMAKE_SOURCE_DIR}/tests/integration/rotted.supp"
         EXPECT "EXPECT_UNUSED_RULES=1"
                "EXPECT_EXIT=2")
+
+    # The poc/ demonstration. Its README quotes these numbers, so pinning them
+    # here is what stops the demo drifting away from its own documentation --
+    # and a demonstration nobody tests is one that breaks quietly.
+    if(TARGET docindex)
+        leakhunter_add_integration_test(integration_poc_docindex docindex
+            EXPECT "EXPECT_LEAK_COUNT=700"
+                   "EXPECT_MIN_GROUPS=3"
+                   "EXPECT_MISMATCHES=8"
+                   "EXPECT_MISMATCH_FUNCTION=copyPayload"
+                   "EXPECT_MIN_THREADS=4"
+                   "EXPECT_FUNCTION=indexBatch"
+                   "EXPECT_EXIT=1")
+
+        # And the worked suppression file must keep doing what its comments claim.
+        leakhunter_add_integration_test(integration_poc_suppressed docindex
+            EXTRA_ARGS "--suppressions;${CMAKE_SOURCE_DIR}/poc/docindex.supp"
+            EXPECT "EXPECT_LEAK_COUNT=600"
+                   "EXPECT_SUPPRESSED=100"
+                   "EXPECT_UNUSED_RULES=0"
+                   "EXPECT_ABSENT=indexBatch"
+                   "EXPECT_EXIT=1")
+    endif()
 
     # A target killed mid-run never runs the agent's destructor. Without the
     # fatal-signal flush the entire buffered trace is lost, so this guards the

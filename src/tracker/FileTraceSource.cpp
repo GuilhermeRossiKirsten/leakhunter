@@ -67,9 +67,16 @@ Status FileTraceSource::replay(ITraceVisitor& visitor) {
 
     ipc::FileHeader header{};
     if (!stream.readPod(header)) {
+        // Three causes, and we genuinely cannot tell them apart from here -- so
+        // list them instead of picking one. If the agent managed to say
+        // something on stderr (an EBADF from a target that closed our
+        // descriptor, say), that message is the authoritative one and it has
+        // already been printed above this.
         return Error{fmt::format(
-            "trace file '{}' is empty -- the target produced no allocation data. It may be "
-            "statically linked, or it may bypass the libc allocator.",
+            "trace file '{}' is empty -- no allocation data reached it. Either the target is "
+            "statically linked (nothing for LD_PRELOAD to interpose on), or it bypasses the libc "
+            "allocator, or it closed the trace descriptor before anything was flushed. Any agent "
+            "message printed above this line takes precedence.",
             path_.string())};
     }
     if (header.magic != ipc::kMagic) {

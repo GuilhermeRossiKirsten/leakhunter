@@ -65,6 +65,9 @@ private:
     void writeEndRecord() noexcept;
     void installCrashHandlers() noexcept;
 
+    /// Says on stderr why the trace is incomplete, when it is.
+    void reportWriteFailure() noexcept;
+
     std::atomic<bool> active_{false};
     std::atomic<bool> initialized_{false};
 

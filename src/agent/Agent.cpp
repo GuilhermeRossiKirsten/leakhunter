@@ -279,12 +279,20 @@ void Agent::installForkHandlers() noexcept {
     // The child then stops tracing altogether: two processes appending partial
     // buffers to one trace file would corrupt it, and stitching multi-process
     // traces together is a feature of its own (see docs/ROADMAP.md).
+    //
+    // Clearing `active_` is necessary but nowhere near sufficient. The child
+    // also inherits a copy of the parent's *unflushed buffer* and the same open
+    // file description -- hence the same file offset -- so anything that flushes
+    // in the child duplicates the parent's records and shifts the parent's next
+    // write. abandonInChild() is what actually severs the connection; see its
+    // comment for what this looked like before.
     ::pthread_atfork(
         []() noexcept { Agent::instance().writer_.lock(); },
         []() noexcept { Agent::instance().writer_.unlock(); },
         []() noexcept {
             Agent& agent = Agent::instance();
             agent.active_.store(false, std::memory_order_release);
+            agent.writer_.abandonInChild();
             agent.writer_.unlock();
         });
 }
@@ -444,6 +452,34 @@ void Agent::shutdown() noexcept {
     writeSymbolTable();
     writeEndRecord();
     writer_.close();
+
+    reportWriteFailure();
+}
+
+void Agent::reportWriteFailure() noexcept {
+    const int failure = writer_.lastWriteErrno();
+    if (failure == 0) {
+        return;
+    }
+
+    // Always on stderr, not only under --verbose: the trace is incomplete and
+    // the host cannot work out why on its own. EBADF in particular means the
+    // target closed the descriptor out from under us, which the host would
+    // otherwise report as "the program may be statically linked" -- confidently
+    // and wrongly.
+    char note[320];
+    const char* explanation =
+        failure == EBADF
+            ? "the target closed the trace descriptor (the `for (fd = 3; fd < N; ++fd) close(fd)` "
+              "idiom does this). Records after that point are lost."
+            : "writing the trace failed. The disk may be full.";
+
+    const int length =
+        std::snprintf(note, sizeof(note), "[leakhunter agent] %s (errno %d: %s)\n", explanation,
+                      failure, std::strerror(failure));
+    if (length > 0) {
+        diagnostic(note);
+    }
 }
 
 }  // namespace leakhunter::agent

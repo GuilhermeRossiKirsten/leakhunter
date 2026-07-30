@@ -1,0 +1,21 @@
+# Suppression rules for the demo, to show what a real one looks like.
+#
+#   leakhunter --suppressions poc/docindex.supp build/poc/docindex
+#
+# The scenario: the indexer leak (bug #4) is in a component owned by another
+# team and is already tracked in a ticket. You want CI to stop failing on it
+# while still failing on everything else.
+#
+# The report will still say, in summary.suppressedByRules and in a notice at the
+# top of the HTML, exactly what was hidden and by which rule. A suppression makes
+# a finding stop counting; it never makes it disappear.
+
+# Bug #4 -- tracked, not forgotten.
+file:*/poc/src/IndexWorker.cpp
+
+# Leaving the other three unsuppressed on purpose: the run still exits 1, which
+# is what you want from a gate. Add these to silence the rest, one at a time:
+#
+#   file:*/poc/src/RecordParser.cpp
+#   function:*buildDocument*
+#   function:*copyPayload*

@@ -20,6 +20,7 @@ leakhunter_add_example(crash_after_leak)
 leakhunter_add_example(abrupt_exit)
 leakhunter_add_example(mismatched_free)
 leakhunter_add_example(spawns_child)
+leakhunter_add_example(forks_and_closes_fds)
 
 # The mismatches in this one are the point of the example, so the compiler must
 # not refuse to build it. GCC's -Wmismatched-new-delete catches the two cases it

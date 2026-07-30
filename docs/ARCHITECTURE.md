@@ -244,10 +244,60 @@ locks the writer before the fork and unlocks it after, in both processes.
 The child then **stops tracing**: two processes appending partial buffers to one file would corrupt
 it. Only the top-level process is recorded — see the [roadmap](ROADMAP.md).
 
-This handles a bare `fork()`, where the child keeps running the same image and the atfork handler
-still applies. It does **not** cover `fork()` followed by `exec()`, which replaces the image and
-re-runs the agent's constructor from scratch — the atfork handler's decision is wiped along with
-everything else. That case is section 10.
+**Clearing the "am I tracing" flag is not enough, and for a long time that was the whole handler.**
+Two more things cross `fork()`:
+
+| Inherited | Consequence |
+|---|---|
+| a **copy of the write buffer**, still holding the parent's unflushed records — *including the file header* | anything that flushes in the child writes a second copy of all of it |
+| the **same open file description** | parent and child share one file *offset*, so every byte the child writes pushes the parent's next flush further into the file |
+
+The child does not have to record anything to do damage. The interposed `_exit()` calls
+`emergencyFlush()`; a fatal signal does the same. Either one writes the parent's records again, at
+the shared offset. The resulting file was:
+
+```
+[parent's header][8 module records][50 allocations]   ← written by the CHILD's flush
+[parent's header][100 allocations][symbols][end]      ← written by the PARENT, at the shared offset
+ ^
+ the host reads from 0, gets 50 allocations, hits a second magic number,
+ treats it as an unknown record type, and stops. No end marker.
+```
+
+Measured on a program that leaks 100 blocks around a `fork()`: **50 reported**.
+
+`TraceWriter::abandonInChild()` fixes it by severing the connection instead of just muting it — the
+child discards its buffer copy *unwritten* and closes its own descriptor (which leaves the parent's
+untouched, since only the descriptor goes away, not the file description). The discarded bytes are
+deliberately **not** counted as dropped: they still live in the parent's buffer, and counting them
+would make the parent's own trace claim to be incomplete.
+
+This covers a bare `fork()`, where the child keeps the same image. `fork()` followed by `exec()`
+replaces the image and re-runs the agent's constructor from scratch, wiping the handler's decision
+along with everything else — that is section 10.
+
+### 7b. A target that closes the trace descriptor
+
+```c
+for (int fd = 3; fd < 256; ++fd) { close(fd); }
+```
+
+That is the standard way for a daemon to shed inherited descriptors, and it closed ours. Writes then
+failed with `EBADF`, the trace ended wherever the program happened to be, and a program that closed
+its descriptors early produced an *empty* trace — which the host reported as "it may be statically
+linked". Confidently, and wrongly, about a dynamically linked program that had allocated a thousand
+times.
+
+Two changes, because neither is sufficient alone:
+
+- **Sit above the loop.** After opening, the descriptor is moved above 512 with
+  `fcntl(F_DUPFD_CLOEXEC)`. Hard-coded `close()` loops almost always stop at 256 or 1024, so this
+  makes the common form harmless. It is mitigation, not a guarantee.
+- **Name the failure when it happens anyway.** `close_range(3, ~0U)` and `closefrom()` still take
+  the descriptor. The writer now keeps the `errno` that broke it, and the agent prints an
+  explanation on stderr at shutdown — unconditionally, not only under `--verbose`, because the trace
+  is incomplete and the host cannot work out why on its own. The host's own message lists the three
+  possible causes instead of asserting one, and says that an agent message takes precedence.
 
 ### 8. Targets that die without shutting down
 
@@ -432,6 +482,7 @@ LeakHunter/
 │   ├── unit/                   # registry, CLI, analyzer, reports, wire format
 │   └── integration/            # run_case.cmake — real CLI, real agent, real programs
 ├── examples/                   # one program per leak shape
+├── poc/                        # docindex: a realistic demo with four planted defects
 └── docs/
 ```
 
@@ -458,6 +509,9 @@ production.
 | `crash_after_leak` | ≥400 leaks survive a `SIGSEGV`, named and located, flagged partial |
 | `abrupt_exit` | ≥250 leaks survive `_exit(3)`, flagged partial |
 | `spawns_child` | exactly 20100 parent leaks; the exec'd child's 500 are absent |
+| `forks_and_closes_fds` | exactly 400 leaks across a bare `fork()` *and* an fd purge; the child's 300 absent |
+| `poc/docindex` | 700 leaks in 3 sites, 8 mismatched frees, one site spanning 4 threads — the numbers its README quotes |
+| `poc/docindex --suppressions` | the worked suppression file still hides exactly its 100 and nothing else |
 | `multiple_leaks --suppressions` | 111 leaks become 11; the suppressed site is absent and the other two remain |
 | `multiple_leaks` + suppress-all | exit code 0, and the 112 hidden leaks still counted in `suppressedByRules` |
 | `multiple_leaks` + rotted rule | `--strict-suppressions` turns a rule that matched nothing into exit 2 |

@@ -15,6 +15,12 @@ leaks, attribute them to a function, and produce a report you can read or feed t
 reports blocks released through the wrong entry point (`new[]` freed with `delete`), because it
 already has the evidence and the check costs nothing.
 
+**Try it in one command:** [`./poc/run_demo.sh`](poc/) builds a small document indexer with four
+planted defects — an error-path leak, a `clear()` on a container of raw pointers, a `new[]` released
+with `free()` across translation units, and a 2 KiB-per-batch leak on worker threads — and shows
+LeakHunter naming each one with its file and line. The program exits `0` and looks healthy without
+it.
+
 ---
 
 ## Example
@@ -218,6 +224,10 @@ These are deliberate, and documented rather than hidden:
   program still produces a usable report — but anything after the last flush is gone, and the
   report is flagged incomplete (`summary.droppedRecords > 0`).
 - **Custom allocators are invisible** if they call `mmap` directly instead of going through libc.
+- **A target that closes every descriptor can still take the trace away.** The agent's descriptor is
+  moved above 512, which dodges the usual `for (fd = 3; fd < 256; ++fd) close(fd)` idiom, but
+  `close_range()` and `closefrom()` reach it anyway. When that happens the agent says so on stderr
+  rather than leaving an empty trace to be misdiagnosed.
 - **Mismatched-free detection needs both halves of the C++ pair interposed.** A target that
   defines its own global `operator new` or `operator delete` — a static libstdc++, say — keeps its
   own, because the dynamic linker searches the executable before any `LD_PRELOAD` object. When
@@ -232,6 +242,7 @@ These are deliberate, and documented rather than hidden:
 
 | | |
 |---|---|
+| [poc/](poc/) | **Start here.** A working program with four planted defects, and what LeakHunter says about it |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Modules, diagrams, execution flow, design rationale |
 | [USAGE.md](docs/USAGE.md) | Complete CLI reference and recipes |
 | [REPORT_FORMAT.md](docs/REPORT_FORMAT.md) | JSON schema |
