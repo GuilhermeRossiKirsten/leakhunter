@@ -135,6 +135,11 @@ json JsonReportGenerator::toJson(const analysis::LeakReport& report) {
                 // a site that moved a lot of memory and leaked none of it.
                 {"liveBytes", spot.liveBytes},
                 {"liveCount", spot.liveCount},
+                // Outstanding, but owned by libc rather than by the program --
+                // excluded from liveBytes for the same reason the summary keeps
+                // runtimeLeakedBytes out of leakedBytes.
+                {"runtimeLiveBytes", spot.runtimeLiveBytes},
+                {"runtimeLiveCount", spot.runtimeLiveCount},
             });
         }
         document["hotSpots"] = std::move(spots);

@@ -98,8 +98,24 @@ struct HotSpot {
     std::uint64_t totalBytes = 0;     ///< ever allocated here
     std::uint64_t count = 0;          ///< allocations, including freed ones
     std::uint64_t peakLiveBytes = 0;  ///< most this site held at one moment
-    std::uint64_t liveBytes = 0;      ///< still outstanding at exit
+
+    /// Still outstanding at exit and counted against the program, matching
+    /// what `leakedBytes` means in the summary.
+    std::uint64_t liveBytes = 0;
     std::uint64_t liveCount = 0;
+
+    /// Still outstanding, but requested from inside libc or the loader --
+    /// stdio buffers, locale tables. Split out for the same reason the summary
+    /// splits `runtimeLeakedBytes` from `leakedBytes`.
+    ///
+    /// The split has to happen here rather than being inherited, because the
+    /// two views disagree by design: `classifyOrigin` looks at the *first*
+    /// non-allocator frame and sees `libc`, while `findResponsibleFrame` walks
+    /// out of the runtime to give the reader something actionable and sees
+    /// `main`. Without this, a stdio buffer shows up as bytes `main` is still
+    /// holding, in a report whose verdict is PASSED.
+    std::uint64_t runtimeLiveBytes = 0;
+    std::uint64_t runtimeLiveCount = 0;
 
     /// Bytes allocated per byte ever held at once, for this site alone.
     /// High means the site churns; the memory is going back, repeatedly.

@@ -462,11 +462,22 @@ constexpr std::string_view kScript = R"JS(
     for (const analysis::HotSpot& spot : report.hotSpots) {
         // A site that returned everything is the interesting case, so it gets
         // the affirmative label rather than a blank cell.
-        const std::string live =
-            spot.liveBytes == 0
-                ? std::string{R"(<span class="ok-note">all released</span>)"}
-                : fmt::format(R"(<span class="danger">{}</span>)",
-                              escapeHtml(formatBytes(spot.liveBytes)));
+        // Red is reserved for bytes the program is accountable for. A stdio
+        // buffer shown in danger-red under a PASSED verdict is how a correct
+        // report gets read as a broken one.
+        std::string live;
+        if (spot.liveBytes > 0) {
+            live = fmt::format(R"(<span class="danger">{}</span>)",
+                               escapeHtml(formatBytes(spot.liveBytes)));
+        } else if (spot.runtimeLiveBytes > 0) {
+            live = fmt::format(
+                R"(<span class="ok-note" title="Requested from inside libc or the dynamic )"
+                R"(loader -- a stdio buffer or locale table. Released by the OS, not counted )"
+                R"(as a leak.">{} &middot; C runtime</span>)",
+                escapeHtml(formatBytes(spot.runtimeLiveBytes)));
+        } else {
+            live = R"(<span class="ok-note">all released</span>)";
+        }
 
         rows += fmt::format(
             R"(<tr><td class="fn">{}<div class="loc">{}</div></td>)"

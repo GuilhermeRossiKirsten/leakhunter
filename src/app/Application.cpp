@@ -533,6 +533,12 @@ void Application::Impl::printHotSpots(const analysis::LeakReport& report) const 
         }
         if (spot.liveBytes > 0) {
             out_ << fmt::format(", {} still live", formatBytes(spot.liveBytes));
+        } else if (spot.runtimeLiveBytes > 0) {
+            // Held by the C runtime by design -- a stdio buffer, a locale
+            // table. Saying "still live" here would contradict a PASSED
+            // verdict two lines above.
+            out_ << fmt::format(", {} held by the C runtime",
+                                formatBytes(spot.runtimeLiveBytes));
         } else {
             out_ << ", all of it released";
         }

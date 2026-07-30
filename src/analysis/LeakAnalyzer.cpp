@@ -351,6 +351,12 @@ void LeakAnalyzer::rankHotSpots(LeakReport& report, std::vector<AllocationSite> 
     for (AllocationSite& site : sites) {
         StackTrace trace = resolver_.resolveAll(site.callStack);
         const std::size_t blamed = findResponsibleFrame(trace);
+
+        // Computed before `trace` is moved into the spot below. Origin is a
+        // property of the stack, so one registry site -- one exact stack -- has
+        // exactly one origin.
+        const LeakOrigin origin = classifyOrigin(trace);
+
         const StackFrame* frame = blamed < trace.size() ? &trace[blamed] : nullptr;
 
         const std::string key =
@@ -379,8 +385,17 @@ void LeakAnalyzer::rankHotSpots(LeakReport& report, std::vector<AllocationSite> 
         HotSpot& spot = report.hotSpots[position->second];
         spot.totalBytes += site.totalBytes;
         spot.count += site.count;
-        spot.liveBytes += site.liveBytes;
-        spot.liveCount += site.liveCount;
+
+        // A merged spot can hold both kinds: `main` can have allocations of its
+        // own *and* be the frame blamed for a stdio buffer, which is exactly
+        // what made a PASSED run display bytes in red.
+        if (origin == LeakOrigin::Runtime) {
+            spot.runtimeLiveBytes += site.liveBytes;
+            spot.runtimeLiveCount += site.liveCount;
+        } else {
+            spot.liveBytes += site.liveBytes;
+            spot.liveCount += site.liveCount;
+        }
 
         // Summed, not maxed. Two call paths into one function can hold their
         // blocks at the same time, so the site's true high-water mark is at

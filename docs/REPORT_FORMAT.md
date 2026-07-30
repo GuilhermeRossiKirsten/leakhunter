@@ -364,7 +364,8 @@ the registry forgets a block the moment it is freed.
 | `averageBytes` | number | `totalBytes / count` |
 | `peakLiveBytes` | number | the most this one site held at a single moment |
 | `turnover` | number | `totalBytes / peakLiveBytes` — how hard this site recycles |
-| `liveBytes` / `liveCount` | number | still outstanding at exit; **`0` is the interesting case** |
+| `liveBytes` / `liveCount` | number | still outstanding **and charged to the program**; `0` is the interesting case |
+| `runtimeLiveBytes` / `runtimeLiveCount` | number | still outstanding, but requested from inside libc — see below |
 
 `hotSpotsTruncated` sits beside the array: `true` means the program had more distinct call sites
 than could be tracked (20,000), so the ranking favours sites seen early.
@@ -374,6 +375,26 @@ because it has no symbols to key on anything better; a helper called from three 
 otherwise be three rows with the same name and nothing to distinguish them. `peakLiveBytes` is
 **summed** across the merged paths rather than maxed — two call paths can hold their blocks
 simultaneously, so the max would report less than the site demonstrably held.
+
+### Why `runtimeLiveBytes` is separate
+
+Two rules look at the same stack and disagree, on purpose:
+
+```
+printf's buffer:  malloc <- _IO_file_doallocate <- _IO_vfprintf <- main
+                  |        |__ libc.so ________________________|    |__ your binary
+                  |__ allocator
+
+classifyOrigin        first non-allocator frame is in libc  ->  Runtime, not a leak
+findResponsibleFrame  walks out of libc to something clickable -> main
+```
+
+So a stdio buffer is attributed to **`main`** — there is nothing else worth showing a reader — while
+the bytes belong to the C runtime. Folding them into `liveBytes` made a `PASSED` report display bytes
+in red against `main`, which is how a correct report gets read as a broken one.
+
+The invariant, across all sites: `sum(liveBytes) == summary.leakedBytes` and
+`sum(runtimeLiveBytes) == summary.runtimeLeakedBytes` — provided no site fell outside the top ten.
 
 **This is not a leak list.** Nothing here affects `summary.clean`, the exit code, or any leak count.
 

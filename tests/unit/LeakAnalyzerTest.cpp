@@ -687,3 +687,65 @@ LH_TEST(HotSpots, turnover_is_zero_rather_than_infinite_when_nothing_was_held) {
     LH_CHECK_EQ(report.hotSpots[0].turnover(), 0.0);
     LH_CHECK_EQ(report.hotSpots[0].averageBytes(), std::uint64_t{1024});
 }
+
+LH_TEST(HotSpots, a_stdio_buffer_is_not_charged_to_the_function_that_printed) {
+    // The bug this exists to prevent, found by a reader looking at a PASSED
+    // report that showed 1 KiB in red.
+    //
+    // printf's buffer is allocated inside libc and never freed, by design. Two
+    // rules look at that stack and disagree on purpose:
+    //
+    //   classifyOrigin       -> first non-allocator frame is libc  -> Runtime
+    //   findResponsibleFrame -> walks out of libc to give the reader
+    //                           something actionable                -> main
+    //
+    // The hot spot must be attributed to main (there is nothing else to click)
+    // while its outstanding bytes stay out of liveBytes, or a clean run
+    // displays bytes the program is not accountable for.
+    FakeResolver resolver = makeResolver();
+    constexpr std::uint64_t kLibcPrintfPc = 0x500;
+    resolver.define(kLibcPrintfPc, "_IO_file_doallocate", "/usr/lib/libc.so.6");
+
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report;
+    analyzer.rankHotSpots(report, {site({kMallocPc, kLibcPrintfPc, kMainPc}, 4096, 1, 4096,
+                                        /*liveBytes=*/4096, /*liveCount=*/1)});
+
+    LH_CHECK_EQ(report.hotSpots.size(), std::size_t{1});
+    const auto& spot = report.hotSpots[0];
+
+    // Blamed on main, because "leaked in _IO_file_doallocate" helps nobody.
+    LH_CHECK_EQ(spot.function, std::string{"main"});
+    // ...but the bytes are the C runtime's, not main's.
+    LH_CHECK_EQ(spot.liveBytes, std::uint64_t{0});
+    LH_CHECK_EQ(spot.liveCount, std::uint64_t{0});
+    LH_CHECK_EQ(spot.runtimeLiveBytes, std::uint64_t{4096});
+    LH_CHECK_EQ(spot.runtimeLiveCount, std::uint64_t{1});
+    // The volume is still reported: it is real traffic through the allocator.
+    LH_CHECK_EQ(spot.totalBytes, std::uint64_t{4096});
+}
+
+LH_TEST(HotSpots, one_spot_can_hold_both_its_own_bytes_and_the_runtimes) {
+    // Exactly the merged case from the report that prompted this: `main` has
+    // allocations of its own *and* is the frame blamed for a stdio buffer.
+    FakeResolver resolver = makeResolver();
+    constexpr std::uint64_t kLibcPrintfPc = 0x500;
+    resolver.define(kLibcPrintfPc, "_IO_file_doallocate", "/usr/lib/libc.so.6");
+
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report;
+    analyzer.rankHotSpots(report, {
+        // main's own leak, through its own allocation.
+        site({kMallocPc, kMainPc}, 2048, 2, 2048, /*liveBytes=*/2048, /*liveCount=*/2),
+        // ...and the buffer libc took while main was printing.
+        site({kMallocPc, kLibcPrintfPc, kMainPc}, 4096, 1, 4096, 4096, 1),
+    });
+
+    LH_CHECK_EQ(report.hotSpots.size(), std::size_t{1});
+    const auto& spot = report.hotSpots[0];
+    LH_CHECK_EQ(spot.totalBytes, std::uint64_t{2048 + 4096});
+    LH_CHECK_EQ(spot.liveBytes, std::uint64_t{2048});          // main's, and red
+    LH_CHECK_EQ(spot.runtimeLiveBytes, std::uint64_t{4096});   // libc's, and not
+}
