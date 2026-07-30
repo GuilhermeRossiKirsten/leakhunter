@@ -94,6 +94,28 @@ h2 { margin: 2.25rem 0 .85rem; font-size: 1.15rem; }
 .verdict { display: inline-block; margin-top: .9rem; padding: .35rem .8rem; border-radius: 999px; font-weight: 600; font-size: .85rem; }
 .verdict.bad { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
 .verdict.good { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.timeline { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.1rem 1.1rem; }
+.timeline svg { display: block; width: 100%; height: 220px; overflow: visible; }
+.tl-area { fill: color-mix(in srgb, var(--accent) 22%, transparent); stroke: none; }
+.tl-line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.tl-axis { display: flex; justify-content: space-between; color: var(--muted); font-size: .78rem; margin-top: .3rem; border-top: 1px solid var(--border); padding-top: .35rem; }
+.tl-facts { display: flex; flex-wrap: wrap; gap: 1.75rem; margin-top: .9rem; }
+.tl-facts .label { display: block; color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+.tl-facts .value { display: block; font-size: 1.25rem; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: .2rem; }
+.tl-facts .hint { display: block; color: var(--muted); font-size: .78rem; }
+.tl-summary { color: var(--muted); font-size: .88rem; margin: .9rem 0 0; max-width: 78ch; }
+.timeline-warn { margin: .7rem 0 0; padding: .55rem .75rem; border-radius: 8px; font-size: .85rem;
+  background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.section-note { color: var(--muted); font-size: .88rem; max-width: 86ch; margin: 0 0 .9rem; }
+.hotspots { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.hotspots th, .hotspots td { padding: .55rem .8rem; border-bottom: 1px solid var(--border); text-align: left; }
+.hotspots thead th { color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+.hotspots tbody tr:last-child td { border-bottom: none; }
+.hotspots .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hotspots .fn { font-family: var(--mono); font-size: .85rem; word-break: break-word; }
+.hotspots .loc { color: var(--muted); font-size: .75rem; font-family: var(--mono); margin-top: .15rem; }
+.hotspots .danger { color: var(--danger); }
+.hotspots .ok-note { color: var(--muted); font-size: .82rem; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .85rem; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: .9rem 1rem; }
 .card .label { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
@@ -343,6 +365,141 @@ constexpr std::string_view kScript = R"JS(
 })();
 )JS";
 
+/// An area chart of live memory, as inline SVG.
+///
+/// SVG rather than a canvas and a script: the report is a single file that
+/// people mail to each other and open from disk, and a chart that needs
+/// JavaScript to exist is a chart that is blank in half the places this lands.
+/// The path is computed here, in C++, and the browser only has to draw it.
+[[nodiscard]] std::string renderTimeline(const analysis::LeakReport& report) {
+    const analysis::MemoryTimeline& timeline = report.timeline;
+    if (timeline.empty() || timeline.peakBytes == 0) {
+        return {};
+    }
+
+    // A viewBox with no units, so the chart scales to whatever width the
+    // container has. Height is fixed: an area chart taller than it is wide
+    // exaggerates every slope.
+    constexpr double kWidth = 1000.0;
+    constexpr double kHeight = 220.0;
+
+    const std::size_t count = timeline.samples.size();
+    const double step = count > 1 ? kWidth / static_cast<double>(count - 1) : kWidth;
+
+    std::string area = fmt::format("M 0,{:.1f}", kHeight);
+    std::string line;
+
+    for (std::size_t i = 0; i < count; ++i) {
+        const double x = static_cast<double>(i) * step;
+        const double y = kHeight - (static_cast<double>(timeline.samples[i].liveBytes) /
+                                    static_cast<double>(timeline.peakBytes)) *
+                                       kHeight;
+        area += fmt::format(" L {:.1f},{:.1f}", x, y);
+        line += fmt::format("{}{:.1f},{:.1f}", line.empty() ? "M " : " L ", x, y);
+    }
+    area += fmt::format(" L {:.1f},{:.1f} Z", static_cast<double>(count - 1) * step, kHeight);
+
+    const std::uint64_t durationNs = report.stats.durationNs() > 0
+                                         ? report.stats.durationNs()
+                                         : report.process.durationMs * 1'000'000ULL;
+    const std::string duration =
+        durationNs > 0 ? fmt::format("{:.2f}s", static_cast<double>(durationNs) / 1e9)
+                       : std::string{"end"};
+
+    // The truncation notice is a block, not a footnote. A reader who takes the
+    // flat tail at face value concludes the leak stopped, which is the opposite
+    // of what a truncated timeline means.
+    std::string notice;
+    if (timeline.truncated) {
+        notice = fmt::format(
+            R"(<p class="timeline-warn">Truncated: these samples cover roughly the first {:.0f}% )"
+            R"(of the run. The flat tail is missing data, not stable memory.</p>)",
+            timeline.coverage * 100.0);
+    }
+
+    return fmt::format(R"(
+  <h2>Memory over time</h2>
+  <section class="timeline">
+    <svg viewBox="0 0 {width:.0f} {height:.0f}" preserveAspectRatio="none" role="img"
+         aria-label="Live memory over the run, peaking at {peakLabel}">
+      <path class="tl-area" d="{area}"/>
+      <path class="tl-line" d="{line}"/>
+    </svg>
+    <div class="tl-axis"><span>start</span><span>{duration}</span></div>
+    <div class="tl-facts">
+      <div><span class="label">Peak live</span><span class="value">{peakLabel}</span>
+        <span class="hint">{peakBlocks} blocks</span></div>
+      <div><span class="label">Ended holding</span><span class="value">{finalLabel}</span></div>
+      <div><span class="label">Turnover</span><span class="value">{turnover:.1f}&times;</span>
+        <span class="hint">allocated / peak held at once</span></div>
+    </div>
+    <p class="tl-summary">{summary}</p>
+    {notice}
+  </section>)",
+                       fmt::arg("width", kWidth), fmt::arg("height", kHeight),
+                       fmt::arg("area", area), fmt::arg("line", line),
+                       fmt::arg("duration", escapeHtml(duration)),
+                       fmt::arg("peakLabel", escapeHtml(formatBytes(timeline.peakBytes))),
+                       fmt::arg("peakBlocks", timeline.peakBlocks),
+                       fmt::arg("finalLabel",
+                                escapeHtml(formatBytes(timeline.samples.back().liveBytes))),
+                       fmt::arg("turnover", timeline.turnover),
+                       fmt::arg("summary", escapeHtml(timeline.summary())),
+                       fmt::arg("notice", notice));
+}
+
+/// Where the memory went, leaked or not.
+///
+/// Deliberately below the leak table and labelled unmistakably: every row here
+/// may have returned every byte it took, and a reader who mistakes this for a
+/// leak list will go and "fix" correct code.
+[[nodiscard]] std::string renderHotSpots(const analysis::LeakReport& report) {
+    if (report.hotSpots.empty()) {
+        return {};
+    }
+
+    std::string rows;
+    for (const analysis::HotSpot& spot : report.hotSpots) {
+        // A site that returned everything is the interesting case, so it gets
+        // the affirmative label rather than a blank cell.
+        const std::string live =
+            spot.liveBytes == 0
+                ? std::string{R"(<span class="ok-note">all released</span>)"}
+                : fmt::format(R"(<span class="danger">{}</span>)",
+                              escapeHtml(formatBytes(spot.liveBytes)));
+
+        rows += fmt::format(
+            R"(<tr><td class="fn">{}<div class="loc">{}</div></td>)"
+            R"(<td class="num">{}</td><td class="num">{}</td><td class="num">{}</td>)"
+            R"(<td class="num">{}</td><td class="num">{}</td></tr>)",
+            escapeHtml(spot.function), escapeHtml(spot.location),
+            escapeHtml(formatBytes(spot.totalBytes)), spot.count,
+            escapeHtml(formatBytes(spot.averageBytes())),
+            escapeHtml(formatBytes(spot.peakLiveBytes)), live);
+    }
+
+    std::string notice;
+    if (report.hotSpotsTruncated) {
+        notice =
+            R"(<p class="timeline-warn">More distinct call sites than could be tracked; )"
+            R"(this ranking favours sites that appeared early in the run.</p>)";
+    }
+
+    return fmt::format(R"(
+  <h2>Where the memory went</h2>
+  <p class="section-note">Ranked by bytes allocated, <strong>not</strong> by bytes leaked. A row here
+  may have released everything it took &mdash; that is the point. A function moving gigabytes through
+  a small working set is a real cost that a leak report cannot see, and the fix is reserving,
+  pooling or reusing rather than ownership.</p>
+  <table class="hotspots">
+    <thead><tr><th>Function</th><th class="num">Allocated</th><th class="num">Calls</th>
+      <th class="num">Average</th><th class="num">Peak held</th><th class="num">Still live</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+  {notice})",
+                       fmt::arg("rows", rows), fmt::arg("notice", notice));
+}
+
 }  // namespace
 
 std::string HtmlReportGenerator::render(const analysis::LeakReport& report) {
@@ -488,6 +645,7 @@ std::string HtmlReportGenerator::render(const analysis::LeakReport& report) {
       <div class="hint">high-water mark</div></div>
   </section>
   {notices}
+  {timeline}
 
   <h2>Leaks by function</h2>
   <div class="toolbar">
@@ -516,6 +674,7 @@ std::string HtmlReportGenerator::render(const analysis::LeakReport& report) {
     the block was <em>allocated</em>.</p>
     <div id="mismatch-body"></div>
   </section>
+  {hotSpots}
 
   <footer>
     Generated by leakhunter {version} &middot; click a row to expand its stack trace &middot;
@@ -548,6 +707,8 @@ std::string HtmlReportGenerator::render(const analysis::LeakReport& report) {
         fmt::arg("leakCount", report.leakCount),
         fmt::arg("groupCount", report.groups.size()),
         fmt::arg("peak", formatBytes(stats.peakLiveBytes)),
+        fmt::arg("timeline", renderTimeline(report)),
+        fmt::arg("hotSpots", renderHotSpots(report)),
         fmt::arg("notices", notices),
         fmt::arg("emptyBody", body),
         fmt::arg("version", report.toolVersion));

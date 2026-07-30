@@ -107,6 +107,14 @@ every block was released -- through the wrong door
 - **Triage, not just a list.** Each site is classified by when its leaks happened — a fixed start-up
   cost reads differently from one growing 200 MiB/day — with an extrapolated rate, advice keyed to
   the allocator used, and a ready-to-paste suppression rule.
+- **Memory over time, not just what was left.** Every report carries a profile of live memory
+  across the run: peak, when it happened, how much of it came back, and turnover — how many bytes
+  passed through the allocator per byte ever held at once. A program that peaks at 900 MiB and exits
+  holding 4 KiB has no leak and a very real problem, and a leak count alone calls that clean.
+- **Where the memory went, not only what stayed.** The ten call sites that allocated the most
+  bytes, ranked by volume rather than by what leaked — including sites that released every byte
+  they took. A function pushing gigabytes through a small working set is a real cost with a real
+  fix (reserve, pool, reuse), and a leak report cannot see it at all.
 - **Attribution, not just addresses.** Allocator frames are skipped so the blame lands on *your*
   function, and leaks are grouped by that function.
 - **The leaking line, shown.** Reports include the source line itself with a caret on the exact
@@ -254,6 +262,11 @@ These are deliberate, and documented rather than hidden:
   LeakHunter detects that it sees only one half, it suppresses the whole check rather than
   reporting the artefacts, and says so in the report (`summary.mismatchDetection`). Leak detection
   is unaffected.
+- **Allocation hot spots are capped at 20,000 distinct call sites.** Past that the ranking favours
+  sites seen early in the run, and `hotSpotsTruncated` says so.
+- **The memory profile is capped at 2,000,000 events.** Past that it covers only the start of the
+  run and is marked `truncated` — which every renderer states outright, because a truncated profile
+  goes flat and looks exactly like a leak that stopped.
 - **Double frees are not detected.** A second free of an address we have already retired looks
   the same as a free of something allocated before tracing began; both are counted in
   `summary.untrackedFrees`.

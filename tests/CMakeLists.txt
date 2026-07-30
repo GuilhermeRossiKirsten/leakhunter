@@ -9,6 +9,7 @@ add_executable(leakhunter_unit_tests
     unit/GlobTest.cpp
     unit/LeakAnalyzerTest.cpp
     unit/LeakTriageTest.cpp
+    unit/MemoryTimelineTest.cpp
     unit/ReportGeneratorTest.cpp
     unit/SourceSnippetTest.cpp
     unit/SuppressionSetTest.cpp
@@ -76,7 +77,11 @@ if(LEAKHUNTER_BUILD_AGENT AND LEAKHUNTER_BUILD_EXAMPLES)
     leakhunter_add_integration_test(integration_threaded_leak threaded_leak
         EXPECT "EXPECT_LEAK_COUNT=100"
                "EXPECT_LEAKED_BYTES=51200"
-               "EXPECT_MIN_THREADS=4")
+               "EXPECT_MIN_THREADS=4"
+               # Four threads means timestamps that arrive out of order, which
+               # is the case the timeline has to sort before bucketing.
+               "EXPECT_TIMELINE=1"
+               "EXPECT_HOTSPOTS=1")
 
     # operator new / operator new[], with the matched pairs excluded.
     leakhunter_add_integration_test(integration_new_delete new_delete
@@ -294,6 +299,10 @@ if(LEAKHUNTER_BUILD_AGENT AND LEAKHUNTER_BUILD_EXAMPLES)
                    "EXPECT_LEAKED_BYTES=0"
                    "EXPECT_MISMATCHES=0"
                    "EXPECT_NO_SNIPPETS=1"
+                   # A clean run has no leaks and no groups, so the timeline and
+                   # the hot spots are all the report has left to say.
+                   "EXPECT_TIMELINE=1"
+                   "EXPECT_HOTSPOTS=1"
                    "EXPECT_EXIT=0")
     endif()
 

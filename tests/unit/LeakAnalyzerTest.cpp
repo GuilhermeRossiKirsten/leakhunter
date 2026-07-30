@@ -543,3 +543,147 @@ LH_TEST(Analyzer, mismatches_beyond_the_cap_are_counted_not_listed) {
     LH_CHECK_EQ(report.mismatchedFrees.size(), std::size_t{3});
     LH_CHECK_EQ(report.suppressedMismatches, std::uint64_t{7});
 }
+
+// --- hot spots ------------------------------------------------------------
+//
+// Not leaks. A site here may have returned every byte it took, and the whole
+// point is that the leak report cannot see it.
+
+namespace {
+
+leakhunter::AllocationSite site(std::vector<std::uint64_t> stack, std::uint64_t totalBytes,
+                                std::uint64_t count, std::uint64_t peakLive,
+                                std::uint64_t liveBytes = 0, std::uint64_t liveCount = 0) {
+    leakhunter::AllocationSite result;
+    result.callStack = std::move(stack);
+    result.totalBytes = totalBytes;
+    result.count = count;
+    result.peakLiveBytes = peakLive;
+    result.liveBytes = liveBytes;
+    result.liveCount = liveCount;
+    return result;
+}
+
+}  // namespace
+
+LH_TEST(HotSpots, a_site_that_freed_everything_is_still_reported) {
+    // The reason this feature exists. 4 MiB through one function, nothing
+    // leaked; the leak report is empty and correct, and silent about the cost.
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report;
+    analyzer.rankHotSpots(report, {site({kMallocPc, kUserPc, kMainPc}, 4 * 1024 * 1024, 4096, 1024)});
+
+    LH_CHECK_EQ(report.hotSpots.size(), std::size_t{1});
+    LH_CHECK_EQ(report.hotSpots[0].function, std::string{"allocateBuffer"});
+    LH_CHECK_EQ(report.hotSpots[0].totalBytes, std::uint64_t{4 * 1024 * 1024});
+    LH_CHECK_EQ(report.hotSpots[0].liveBytes, std::uint64_t{0});
+    LH_CHECK_EQ(report.hotSpots[0].averageBytes(), std::uint64_t{1024});
+    // 4 MiB through a 1 KiB working set.
+    LH_CHECK(report.hotSpots[0].turnover() > 4095.0);
+}
+
+LH_TEST(HotSpots, one_function_reached_by_two_paths_is_one_row) {
+    // The registry keys on the whole stack because it has no symbols. Left
+    // unmerged, a helper called from three places is three rows with identical
+    // names and no way to tell them apart.
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report;
+    analyzer.rankHotSpots(report, {
+        site({kMallocPc, kUserPc, kMainPc}, 1000, 10, 100),
+        site({kMallocPc, kUserPc, kOtherUserPc, kMainPc}, 500, 5, 50),
+    });
+
+    LH_CHECK_EQ(report.hotSpots.size(), std::size_t{1});
+    LH_CHECK_EQ(report.hotSpots[0].function, std::string{"allocateBuffer"});
+    LH_CHECK_EQ(report.hotSpots[0].totalBytes, std::uint64_t{1500});
+    LH_CHECK_EQ(report.hotSpots[0].count, std::uint64_t{15});
+    // Summed: both paths can hold their blocks at the same moment, so taking
+    // the max would claim the site held less than it demonstrably did.
+    LH_CHECK_EQ(report.hotSpots[0].peakLiveBytes, std::uint64_t{150});
+}
+
+LH_TEST(HotSpots, distinct_functions_stay_distinct) {
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report;
+    analyzer.rankHotSpots(report, {
+        site({kMallocPc, kUserPc, kMainPc}, 1000, 10, 100),
+        site({kMallocPc, kOtherUserPc, kMainPc}, 500, 5, 50),
+    });
+
+    LH_CHECK_EQ(report.hotSpots.size(), std::size_t{2});
+    LH_CHECK_EQ(report.hotSpots[0].function, std::string{"allocateBuffer"});
+    LH_CHECK_EQ(report.hotSpots[1].function, std::string{"buildCache"});
+}
+
+LH_TEST(HotSpots, the_ranking_is_by_bytes_moved_not_bytes_kept) {
+    // A site that churns 1 MiB and keeps nothing outranks one that keeps 4 KiB
+    // and never allocated again. That is the opposite of the leak ordering, on
+    // purpose: this section answers a different question.
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report;
+    analyzer.rankHotSpots(report, {
+        site({kMallocPc, kOtherUserPc, kMainPc}, 4096, 1, 4096, 4096, 1),
+        site({kMallocPc, kUserPc, kMainPc}, 1024 * 1024, 1024, 1024),
+    });
+
+    LH_CHECK_EQ(report.hotSpots[0].function, std::string{"allocateBuffer"});
+    LH_CHECK_EQ(report.hotSpots[0].liveBytes, std::uint64_t{0});
+    LH_CHECK_EQ(report.hotSpots[1].function, std::string{"buildCache"});
+}
+
+LH_TEST(HotSpots, the_keep_limit_is_respected_and_keeps_the_largest) {
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report;
+    analyzer.rankHotSpots(report,
+                          {
+                              site({kMallocPc, kUserPc, kMainPc}, 100, 1, 100),
+                              site({kMallocPc, kOtherUserPc, kMainPc}, 999, 1, 999),
+                              site({kMallocPc, kMainPc}, 500, 1, 500),
+                          },
+                          /*keep=*/1);
+
+    LH_CHECK_EQ(report.hotSpots.size(), std::size_t{1});
+    LH_CHECK_EQ(report.hotSpots[0].totalBytes, std::uint64_t{999});
+}
+
+LH_TEST(HotSpots, no_sites_produces_no_section) {
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report;
+    analyzer.rankHotSpots(report, {});
+    LH_CHECK(report.hotSpots.empty());
+}
+
+LH_TEST(HotSpots, an_all_allocator_stack_still_yields_a_row) {
+    // Every frame looks like infrastructure. findResponsibleFrame falls back to
+    // frame 0 rather than dropping the site, because "we cannot name it" is not
+    // a reason to hide a megabyte of traffic.
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report;
+    analyzer.rankHotSpots(report, {site({kMallocPc, kOperatorNewPc}, 4096, 4, 1024)});
+    LH_CHECK_EQ(report.hotSpots.size(), std::size_t{1});
+    LH_CHECK_EQ(report.hotSpots[0].totalBytes, std::uint64_t{4096});
+}
+
+LH_TEST(HotSpots, turnover_is_zero_rather_than_infinite_when_nothing_was_held) {
+    const FakeResolver resolver = makeResolver();
+    LeakAnalyzer analyzer(resolver);
+
+    LeakReport report;
+    analyzer.rankHotSpots(report, {site({kMallocPc, kUserPc}, 1024, 1, /*peakLive=*/0)});
+    LH_CHECK_EQ(report.hotSpots[0].turnover(), 0.0);
+    LH_CHECK_EQ(report.hotSpots[0].averageBytes(), std::uint64_t{1024});
+}

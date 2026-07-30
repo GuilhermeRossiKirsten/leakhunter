@@ -14,6 +14,7 @@
 
 #include "leakhunter/analysis/LeakAnalyzer.hpp"
 #include "leakhunter/analysis/LeakTriage.hpp"
+#include "leakhunter/analysis/MemoryTimeline.hpp"
 #include "leakhunter/analysis/SuppressionSet.hpp"
 #include "leakhunter/core/AgentLocator.hpp"
 #include "leakhunter/report/DiagnosticsWriter.hpp"
@@ -126,6 +127,8 @@ private:
     void printSummary(const analysis::LeakReport& report, const cli::Options& options) const;
     void printSnippet(const SourceSnippet& snippet) const;
     void printTriage(const analysis::LeakTriage& triage) const;
+    void printMemoryProfile(const analysis::LeakReport& report) const;
+    void printHotSpots(const analysis::LeakReport& report) const;
 
     std::unique_ptr<process::IProcessRunner> runner_;
     std::ostream& out_;
@@ -197,6 +200,14 @@ ExitCode Application::Impl::run(const cli::Options& options) {
 
     // 4. Replay the trace into the registry and the symbol table.
     registry::AllocationRegistry allocations;
+    // Keep the deltas as the trace is replayed. They cost 16 bytes per record
+    // and are capped, and they are the only way the report can say anything
+    // about what the run *cost* rather than what it failed to give back.
+    allocations.enableTimeline();
+    // Per-site volume, including blocks that were freed. Bounded by the number
+    // of distinct call stacks rather than the number of allocations.
+    allocations.enableSiteTracking();
+
     symbols::SymbolResolver resolver;
     tracker::MemoryTracker memoryTracker(allocations, resolver);
     tracker::FileTraceSource source(trace.path());
@@ -271,10 +282,24 @@ ExitCode Application::Impl::run(const cli::Options& options) {
     report.targetCommand = joinCommand(options.targetCommand);
     report.mismatchCheck = mismatchCheck;
 
+    // After analyze(), and deliberately not inside it: these sites count blocks
+    // that were freed, so letting them anywhere near the leak verdict would be
+    // a category error.
+    report.hotSpotsTruncated = allocations.siteTrackingTruncated();
+    analyzer.rankHotSpots(report, allocations.takeAllocationSites());
+
     // Now, not inside analyze(): triage needs the run's duration, and for a
     // target we stopped there is no end record, so the only source is the wall
     // clock in ProcessResult -- which is assigned on the line above.
     analysis::triageLeaks(report);
+
+    // Same reason: the coverage fraction of a truncated timeline is measured
+    // against the run's full duration, which is only known here.
+    report.timeline = analysis::buildTimeline(
+        allocations.takeTimelineEvents(), report.stats.totalBytesAllocated,
+        allocations.timelineTruncated(),
+        report.stats.durationNs() > 0 ? report.stats.durationNs()
+                                      : report.process.durationMs * 1'000'000ULL);
 
     // 6b. Read the blamed lines out of the source tree.
     //
@@ -402,6 +427,125 @@ void Application::Impl::printSnippet(const SourceSnippet& snippet) const {
     out_ << "                    " << marker << '\n';
 }
 
+namespace {
+
+/// Breaks @p text at spaces so it fits @p width columns.
+///
+/// Only ever used on sentences this file generates, so it does not need to
+/// handle tabs, wide characters or existing newlines -- and pretending
+/// otherwise would be inventing requirements.
+[[nodiscard]] std::vector<std::string> wrapText(const std::string& text, std::size_t width) {
+    std::vector<std::string> lines;
+    std::string current;
+
+    std::size_t cursor = 0;
+    while (cursor < text.size()) {
+        const std::size_t spaceAt = text.find(' ', cursor);
+        const std::string word = text.substr(
+            cursor, spaceAt == std::string::npos ? std::string::npos : spaceAt - cursor);
+
+        if (!current.empty() && current.size() + 1 + word.size() > width) {
+            lines.push_back(current);
+            current.clear();
+        }
+        current += current.empty() ? word : " " + word;
+
+        if (spaceAt == std::string::npos) {
+            break;
+        }
+        cursor = spaceAt + 1;
+    }
+    if (!current.empty()) {
+        lines.push_back(current);
+    }
+    return lines;
+}
+
+}  // namespace
+
+/// The shape of memory use, which the leak numbers alone cannot show.
+///
+/// A run that peaks at 900 MiB and exits holding 4 KiB has no leak and a very
+/// real problem. Before this existed the report called that clean and said
+/// nothing else about it.
+void Application::Impl::printMemoryProfile(const analysis::LeakReport& report) const {
+    const analysis::MemoryTimeline& timeline = report.timeline;
+    if (timeline.empty()) {
+        return;
+    }
+
+    const std::string spark = analysis::renderSparkline(timeline);
+    if (spark.empty()) {
+        return;  // nothing was ever held; a flat line teaches nobody anything
+    }
+
+    out_ << "  memory over time\n";
+    out_ << fmt::format("    0 |{}| {}\n", spark, formatBytes(timeline.peakBytes));
+
+    // Label the axis with the run's real duration, not the timeline's span:
+    // they differ when the first allocation lands well after the process
+    // started, and the reader is thinking in terms of the run.
+    const std::uint64_t durationNs = report.stats.durationNs() > 0
+                                         ? report.stats.durationNs()
+                                         : report.process.durationMs * 1'000'000ULL;
+    if (durationNs > 0) {
+        out_ << fmt::format("      start{:>{}}{:.2f}s\n", "",
+                            spark.size() - 3, static_cast<double>(durationNs) / 1e9);
+    }
+
+    // wrapAt keeps the sentence inside a terminal without hyphenating it.
+    for (const std::string& line : wrapText(timeline.summary(), 68)) {
+        out_ << "    " << line << "\n";
+    }
+    out_ << "\n";
+}
+
+/// Where the memory went, whether or not it came back.
+///
+/// Distinct from the leak list on purpose, and labelled so nobody reads it as
+/// one: a site here may have returned every byte it took. The finding is the
+/// volume, and the fix is reserve/pool/reuse rather than ownership.
+void Application::Impl::printHotSpots(const analysis::LeakReport& report) const {
+    if (report.hotSpots.empty()) {
+        return;
+    }
+
+    // Only worth the space when a site moved appreciably more than it kept.
+    // Otherwise this section is the leak list again, with worse formatting.
+    const analysis::HotSpot& biggest = report.hotSpots.front();
+    if (biggest.totalBytes <= biggest.liveBytes * 2 && report.leakCount > 0) {
+        return;
+    }
+
+    out_ << "  where the memory went  (allocated, not leaked)\n";
+
+    const std::size_t shown = std::min<std::size_t>(report.hotSpots.size(), 3);
+    for (std::size_t i = 0; i < shown; ++i) {
+        const analysis::HotSpot& spot = report.hotSpots[i];
+        out_ << fmt::format("    {:>10}  x{:<6} {}\n", formatBytes(spot.totalBytes), spot.count,
+                            spot.function);
+
+        // The two numbers that separate churn from growth: what it moved in
+        // total, against the most it ever held at once.
+        out_ << fmt::format("                        peak {} held here", formatBytes(spot.peakLiveBytes));
+        if (spot.turnover() >= 1.5) {
+            out_ << fmt::format(", reused {:.1f}x", spot.turnover());
+        }
+        if (spot.liveBytes > 0) {
+            out_ << fmt::format(", {} still live", formatBytes(spot.liveBytes));
+        } else {
+            out_ << ", all of it released";
+        }
+        out_ << "\n";
+    }
+
+    if (report.hotSpotsTruncated) {
+        out_ << "                        (more call sites than could be tracked; this ranking "
+                "favours sites seen early)\n";
+    }
+    out_ << "\n";
+}
+
 void Application::Impl::printTriage(const analysis::LeakTriage& triage) const {
     if (triage.empty()) {
         return;
@@ -456,6 +600,13 @@ void Application::Impl::printSummary(const analysis::LeakReport& report,
     out_ << fmt::format("  total freed         {:>12}  ({})\n", stats.totalDeallocations,
                         formatBytes(stats.totalBytesFreed));
     out_ << fmt::format("  peak live memory    {:>12}\n", formatBytes(stats.peakLiveBytes));
+    if (report.timeline.turnover >= 1.5) {
+        // Only worth a line when the program actually recycled. A turnover of
+        // 1.0 means every byte allocated was still held at the end, which the
+        // leak numbers below already say more directly.
+        out_ << fmt::format("  turnover            {:>11.1f}x  (allocated / peak held at once)\n",
+                            report.timeline.turnover);
+    }
     out_ << fmt::format("  memory leaked       {:>12}\n", formatBytes(report.leakedBytes));
     out_ << fmt::format("  leaks               {:>12}  in {} distinct site(s)\n", report.leakCount,
                         report.groups.size());
@@ -491,6 +642,9 @@ void Application::Impl::printSummary(const analysis::LeakReport& report,
                 "new/delete)\n";
     }
     out_ << "\n";
+
+    printMemoryProfile(report);
+    printHotSpots(report);
 
     if (!report.mismatchedFrees.empty()) {
         out_ << "  mismatched frees\n";

@@ -118,6 +118,70 @@ if(DEFINED EXPECT_PARTIAL)
     endif()
 endif()
 
+# The timeline is assembled in Application::run rather than in the analyzer,
+# because only the application knows the run's duration. That makes it exactly
+# the kind of wiring that can be dropped without a single unit test noticing --
+# buildTimeline would still be perfect and every report would carry nothing.
+if(DEFINED EXPECT_TIMELINE)
+    string(JSON timeline ERROR_VARIABLE timelineError GET "${report}" timeline)
+    if(timelineError)
+        message(FATAL_ERROR "the report carries no timeline: ${timelineError}")
+    endif()
+
+    string(JSON sampleCount LENGTH "${timeline}" liveBytes)
+    if(sampleCount LESS 2)
+        message(FATAL_ERROR "expected a sampled timeline, got ${sampleCount} sample(s)")
+    endif()
+
+    # The three arrays are plotted against each other; different lengths would
+    # silently shear the chart.
+    string(JSON stampCount LENGTH "${timeline}" timestampsNs)
+    string(JSON blockCount LENGTH "${timeline}" liveBlocks)
+    if(NOT stampCount EQUAL sampleCount OR NOT blockCount EQUAL sampleCount)
+        message(FATAL_ERROR "timeline arrays disagree: ${stampCount} timestamps, "
+                            "${sampleCount} byte samples, ${blockCount} block samples")
+    endif()
+
+    # A peak below the bytes actually leaked is arithmetically impossible: the
+    # leaked blocks were all live at once, by definition, at the end.
+    string(JSON peakBytes GET "${timeline}" peakBytes)
+    if(peakBytes LESS leakedBytes)
+        message(FATAL_ERROR "timeline peak ${peakBytes} is below the ${leakedBytes} bytes "
+                            "reported leaked, which cannot happen")
+    endif()
+endif()
+
+# Same wiring risk as the timeline: rankHotSpots is called from Application, so
+# unit tests can all pass while every report ships without the section.
+if(DEFINED EXPECT_HOTSPOTS)
+    string(JSON spotCount ERROR_VARIABLE spotError LENGTH "${report}" hotSpots)
+    if(spotError)
+        message(FATAL_ERROR "the report carries no hotSpots: ${spotError}")
+    endif()
+    if(spotCount LESS 1)
+        message(FATAL_ERROR "expected at least one allocation hot spot, got ${spotCount}")
+    endif()
+
+    # No site can have allocated more than the whole run did, and none can hold
+    # more than it ever allocated. Both are arithmetic, so a violation means the
+    # accounting is wrong rather than the program being unusual.
+    string(JSON allocatedBytes GET "${report}" summary totalBytesAllocated)
+    math(EXPR lastSpot "${spotCount} - 1")
+    foreach(index RANGE ${lastSpot})
+        string(JSON spotTotal GET "${report}" hotSpots ${index} totalBytes)
+        string(JSON spotPeak GET "${report}" hotSpots ${index} peakLiveBytes)
+        string(JSON spotLive GET "${report}" hotSpots ${index} liveBytes)
+        if(spotTotal GREATER allocatedBytes)
+            message(FATAL_ERROR "hot spot ${index} allocated ${spotTotal} bytes, more than the "
+                                "${allocatedBytes} the whole run allocated")
+        endif()
+        if(spotPeak GREATER spotTotal OR spotLive GREATER spotTotal)
+            message(FATAL_ERROR "hot spot ${index} holds more than it ever allocated: "
+                                "total ${spotTotal}, peak ${spotPeak}, live ${spotLive}")
+        endif()
+    endforeach()
+endif()
+
 if(DEFINED EXPECT_LEAKED_BYTES AND NOT leakedBytes EQUAL EXPECT_LEAKED_BYTES)
     message(FATAL_ERROR "expected ${EXPECT_LEAKED_BYTES} leaked bytes, got ${leakedBytes}")
 endif()

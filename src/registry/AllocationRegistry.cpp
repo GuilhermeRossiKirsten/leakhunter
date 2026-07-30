@@ -5,6 +5,92 @@
 
 namespace leakhunter::registry {
 
+void AllocationRegistry::noteTimeline(std::uint64_t timestampNs, std::int64_t deltaBytes) {
+    if (!collectTimeline_) {
+        return;
+    }
+    if (timeline_.size() >= kMaxTimelineEvents) {
+        timelineTruncated_ = true;
+        return;
+    }
+    timeline_.push_back({timestampNs, deltaBytes});
+}
+
+namespace {
+
+/// FNV-1a over the program counters.
+///
+/// Not cryptographic and does not need to be: a collision merges two call sites
+/// in one report section, it cannot turn a leak into a non-leak.
+[[nodiscard]] std::uint64_t hashStack(const std::vector<std::uint64_t>& callStack) {
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (const std::uint64_t programCounter : callStack) {
+        hash ^= programCounter;
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+}  // namespace
+
+void AllocationRegistry::chargeSite(const std::vector<std::uint64_t>& callStack,
+                                    std::int64_t size) {
+    if (!collectSites_ || callStack.empty()) {
+        return;
+    }
+
+    const std::uint64_t key = hashStack(callStack);
+    const auto existing = sites_.find(key);
+
+    if (existing == sites_.end()) {
+        // A release for a site we are not tracking: the allocation happened
+        // before the cap was hit, or before tracking was on. Dropping it is
+        // right -- inventing a site from a free would report a call site that
+        // never allocated anything.
+        if (size < 0) {
+            return;
+        }
+        if (sites_.size() >= kMaxTrackedSites) {
+            sitesTruncated_ = true;
+            return;
+        }
+        AllocationSite site;
+        site.callStack = callStack;
+        site.totalBytes = static_cast<std::uint64_t>(size);
+        site.count = 1;
+        site.liveBytes = static_cast<std::uint64_t>(size);
+        site.liveCount = 1;
+        site.peakLiveBytes = static_cast<std::uint64_t>(size);
+        sites_.emplace(key, std::move(site));
+        return;
+    }
+
+    AllocationSite& site = existing->second;
+    if (size >= 0) {
+        site.totalBytes += static_cast<std::uint64_t>(size);
+        ++site.count;
+        site.liveBytes += static_cast<std::uint64_t>(size);
+        ++site.liveCount;
+        site.peakLiveBytes = std::max(site.peakLiveBytes, site.liveBytes);
+    } else {
+        const std::uint64_t released = static_cast<std::uint64_t>(-size);
+        site.liveBytes -= std::min(site.liveBytes, released);
+        if (site.liveCount > 0) {
+            --site.liveCount;
+        }
+    }
+}
+
+std::vector<AllocationSite> AllocationRegistry::takeAllocationSites() {
+    std::vector<AllocationSite> result;
+    result.reserve(sites_.size());
+    for (auto& [key, site] : sites_) {
+        result.push_back(std::move(site));
+    }
+    sites_.clear();
+    return result;
+}
+
 void AllocationRegistry::setSessionOrigin(std::uint64_t pid, std::uint64_t startTimestampNs) {
     stats_.pid = pid;
     stats_.startTimestampNs = startTimestampNs;
@@ -26,17 +112,35 @@ void AllocationRegistry::recordAllocation(AllocationInfo&& allocation) {
 
     const std::uint64_t address = allocation.address;
     const std::uint64_t size = allocation.size;
+    const std::uint64_t when = allocation.timestampNs;
 
     // An address reappearing while still live means we missed its free (the
     // allocator reused the block). Trust the newer record and drop the stale
     // one, otherwise the old stack trace would be blamed for a live block.
-    if (const auto existing = live_.find(address); existing != live_.end()) {
+    const auto existing = live_.find(address);
+    if (existing != live_.end()) {
         liveBytes_ -= std::min(liveBytes_, existing->second.size);
+        // The free we missed did happen, and both the timeline and the site
+        // totals have to see it: a program that recycles addresses would
+        // otherwise climb forever while `liveBytes_` -- and reality -- stayed
+        // flat.
+        noteTimeline(when, -static_cast<std::int64_t>(existing->second.size));
+        chargeSite(existing->second.callStack,
+                   -static_cast<std::int64_t>(existing->second.size));
+    }
+
+    // Charged after the eviction above, not before: doing it the other way
+    // round would count both blocks as live at once when they share a site,
+    // overstating that site's peak by one allocation.
+    chargeSite(allocation.callStack, static_cast<std::int64_t>(size));
+
+    if (existing != live_.end()) {
         existing->second = std::move(allocation);
     } else {
         live_.emplace(address, std::move(allocation));
     }
 
+    noteTimeline(when, static_cast<std::int64_t>(size));
     liveBytes_ += size;
     stats_.peakLiveBytes = std::max(stats_.peakLiveBytes, liveBytes_);
 }
@@ -83,6 +187,8 @@ bool AllocationRegistry::recordDeallocation(std::uint64_t address, std::uint64_t
     }
 
     stats_.totalBytesFreed += allocation.size;
+    noteTimeline(timestampNs, -static_cast<std::int64_t>(allocation.size));
+    chargeSite(allocation.callStack, -static_cast<std::int64_t>(allocation.size));
     liveBytes_ -= std::min(liveBytes_, allocation.size);
     live_.erase(it);
     return true;

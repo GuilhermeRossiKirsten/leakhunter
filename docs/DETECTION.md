@@ -183,6 +183,103 @@ and the ownership mistake is untouched — because it was never a syntax problem
 
 ---
 
+## 7. Reading the memory profile
+
+A leak count answers *what was left over*. It says nothing about *what the run cost*, and those are
+different questions with different fixes. Every report now carries a timeline of live memory, in the
+terminal, in `report.json` and as a chart in the HTML.
+
+Four shapes, measured on the POCs in this repository:
+
+### Up, and never down — `poc2/service`
+
+```
+0 |:::::::::::::------------=============++++++++++++**********| 14.50 KiB
+  start                                                    4.01s
+```
+
+Live memory climbed to 14.50 KiB and ended at 14.00 KiB. This is what a leak looks like from outside
+the process, and it is the only shape where the leak count and the profile agree.
+
+**Act on it:** the triage line names the site and extrapolates — `steady`, 8.98 MiB/hour, 215 MiB/day.
+Fix the site. Nothing else in the report matters as much.
+
+### Sawtooth, low ceiling — `poc5/clean_app`
+
+```
+0 |...:-=.........................::**#*##...:::--===+++++++**=| 244.18 KiB
+  start                                                    0.02s
+```
+
+1.88 MiB passed through the allocator; never more than 244.18 KiB was held at once; the run ended
+holding 4.00 KiB. **7.9x turnover.** Zero leaks.
+
+**Act on it:** nothing, usually. This is a program recycling correctly, and the report says so in
+those words rather than leaving a number to be misread. The one thing turnover *is* good for is
+spotting allocation churn on a hot path — 7.9x here comes from a `pmr` arena doing exactly its job,
+but the same figure on a request handler is a pooling opportunity.
+
+### A spike that comes back down
+
+The shape the leak count cannot see at all: a program that peaks at 900 MiB, frees all of it, and
+exits clean. No leak, and an RSS figure that decides how many instances fit on a host.
+
+The peak is tracked **per event, not per sample**, so a spike that rises and falls between two
+samples still registers. A chart alone would have averaged it away.
+
+**Act on it:** the peak, not the leak. Stream instead of slurping; `reserve()` to a realistic size
+rather than a generous one; process in batches.
+
+### Flat, then nothing — the one that lies
+
+A truncated timeline (past 2,000,000 events) shows memory rising and then going flat. That is
+**missing data, not stable memory**, and the two are indistinguishable by eye. Every renderer says so
+explicitly, `truncated` is in the JSON, and `endedNearPeak` is never set on a truncated run — the
+tail it would be describing does not exist.
+
+### The cost a leak report cannot see
+
+Live memory over time says *when* the program was expensive. It does not say *who*. The report also
+ranks call sites by **bytes allocated**, including every byte that was given back — which is the one
+thing a leak detector structurally cannot tell you, because a freed block is erased the moment it is
+freed.
+
+On `poc/docindex`, whose entire point is that it leaks 312 KiB:
+
+```
+where the memory went  (allocated, not leaked)
+  800.00 KiB  x400    <unknown>+0x50ba
+                      peak 6.00 KiB held here, reused 133.3x, all of it released
+  200.00 KiB  x100    <unknown>+0x5009
+                      peak 200.00 KiB held here, 200.00 KiB still live
+```
+
+The top site moved **more memory than the program leaked in total**, held 6 KiB at a time, and
+returned all of it. No leak, no mismatched free, nothing to report — and 400 round trips through the
+allocator that a `reserve()` would remove. That row is invisible in every leak-only view, LeakHunter's
+included, until you go looking for it.
+
+This is the same information `heaptrack` calls *"big spenders"*, and it is the reason a leak count
+alone is a poor summary of what a program costs.
+
+### Mitigation, by shape
+
+| Profile | Leaks reported | What it means | What to do |
+|---|---|---|---|
+| Rises, ends at peak | yes | a real leak | fix the site the triage names |
+| Rises, ends at peak | **no** | growth in memory the tool sees as reachable | a deliberate cache with no bound — add one |
+| Sawtooth, low ceiling | no | healthy recycling | nothing; pool only if it is a hot path |
+| High peak, ends low | no | a transient that sets your RSS | stream, batch, `reserve` honestly |
+| Rises then flat | any | **check `truncated` before believing it** | re-run shorter, or on a smaller workload |
+| Flat and low, but a hot spot moved GiB | no | allocator churn, not growth | `reserve()`, pool, or reuse the buffer |
+
+The second row is the one worth dwelling on. LeakHunter reports everything live at exit, so an
+unbounded cache shows up as leaks; a tool with reachability analysis (§2) calls the same memory
+*still reachable* and reports nothing. **The profile is what makes that case visible in either tool**
+— the memory is growing whether or not anyone is willing to call it a leak.
+
+---
+
 ## Sources
 
 Strategy descriptions and anything not measured above come from:

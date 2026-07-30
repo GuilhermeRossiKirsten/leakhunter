@@ -162,6 +162,33 @@ struct MismatchedFree {
 };
 
 /// Aggregate counters for one monitored run.
+/// Everything one call site ever allocated, whether or not it gave it back.
+///
+/// The leak report deliberately forgets freed blocks -- they are not leaks. But
+/// forgetting them entirely means the report is silent about a function that
+/// allocated 4 GiB across a run and released every byte of it, which is a real
+/// finding with a real fix and no leak anywhere in sight.
+///
+/// Accumulated by the registry, which is the only place that sees both halves.
+struct AllocationSite {
+    std::uint64_t totalBytes = 0;     ///< ever requested here
+    std::uint64_t count = 0;          ///< times, including blocks since freed
+    std::uint64_t liveBytes = 0;      ///< still outstanding at exit
+    std::uint64_t liveCount = 0;
+    std::uint64_t peakLiveBytes = 0;  ///< most this one site ever held at once
+    std::vector<std::uint64_t> callStack;
+};
+
+/// One change in how much memory the target was holding.
+///
+/// Lives in `core` rather than next to MemoryTimeline because the registry is
+/// what produces these -- it is the only place that knows how big a freed block
+/// was -- and the registry must not depend on the analysis layer.
+struct MemoryEvent {
+    std::uint64_t timestampNs = 0;  ///< relative to process start
+    std::int64_t deltaBytes = 0;    ///< positive to allocate, negative to release
+};
+
 struct SessionStats {
     std::uint64_t pid = 0;
     std::uint64_t totalAllocations = 0;

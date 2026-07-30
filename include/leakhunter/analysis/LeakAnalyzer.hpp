@@ -48,6 +48,16 @@ public:
                                      std::vector<MismatchedFree> mismatches,
                                      const SessionStats& stats) override;
 
+    /// Symbolises and ranks the call sites by how much memory passed through
+    /// them, and writes the top @p keep into @p report.
+    ///
+    /// Separate from analyze(): these sites include blocks that were freed, so
+    /// they are not leaks and must not touch a leak verdict. Kept on the
+    /// concrete class rather than ILeakAnalyzer because it is an extra view of
+    /// the same run, not part of the leak-analysis contract.
+    void rankHotSpots(LeakReport& report, std::vector<AllocationSite> sites,
+                      std::size_t keep = 10) const;
+
     /// Index of the first frame that is neither the agent nor an allocator
     /// entry point. Exposed for testing; falls back to 0 when every frame
     /// looks like infrastructure.

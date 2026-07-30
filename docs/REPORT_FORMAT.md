@@ -333,6 +333,105 @@ has no meaningful rate, and emitting `0.0` invites someone to plot it.
 "happened once" — every site looks clustered because the whole run is a cluster — so the pattern
 stays `unknown` and `advice` says why.
 
+## `hotSpots`
+
+Top level. The ten call sites that allocated the most bytes, **ranked by bytes allocated rather
+than bytes leaked**, and present whether or not anything leaked.
+
+A row here may have released every byte it took. That is the point: a function moving gigabytes
+through a small working set is a real cost, and the leak report is structurally blind to it because
+the registry forgets a block the moment it is freed.
+
+```jsonc
+{
+  "function": "poc5::makeRawBuffer(unsigned long)",
+  "module": "/home/dev/build/poc5/clean_app",
+  "location": "poc5/src/Buffers.cpp:31",
+  "totalBytes": 1156608,
+  "count": 1259,
+  "averageBytes": 918,
+  "peakLiveBytes": 134656,
+  "turnover": 8.59,
+  "liveBytes": 0,
+  "liveCount": 0
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `function`, `module`, `location` | string | attributed exactly as a leak group is |
+| `totalBytes` / `count` | number | ever allocated here, across the whole run |
+| `averageBytes` | number | `totalBytes / count` |
+| `peakLiveBytes` | number | the most this one site held at a single moment |
+| `turnover` | number | `totalBytes / peakLiveBytes` — how hard this site recycles |
+| `liveBytes` / `liveCount` | number | still outstanding at exit; **`0` is the interesting case** |
+
+`hotSpotsTruncated` sits beside the array: `true` means the program had more distinct call sites
+than could be tracked (20,000), so the ranking favours sites seen early.
+
+**Sites are merged by responsible frame, not by call stack.** The registry keys on the whole stack
+because it has no symbols to key on anything better; a helper called from three places would
+otherwise be three rows with the same name and nothing to distinguish them. `peakLiveBytes` is
+**summed** across the merged paths rather than maxed — two call paths can hold their blocks
+simultaneously, so the max would report less than the site demonstrably held.
+
+**This is not a leak list.** Nothing here affects `summary.clean`, the exit code, or any leak count.
+
+## `timeline`
+
+Top level, not per group. Present whenever anything was allocated; absent, not null, otherwise.
+
+Where the rest of the report answers *what was left over*, this answers *what the run cost*. A
+program that peaks at 900 MiB and exits holding 4 KiB has no leak and a very real problem, and
+without this the report calls it clean and says nothing else.
+
+```jsonc
+{
+  "peakBytes": 14848,
+  "peakBlocks": 22,
+  "peakAtNs": 3799182004,
+  "turnover": 3.034,
+  "endedNearPeak": true,
+  "truncated": false,
+  "coverage": 1.0,
+  "summary": "Live memory climbed to 14.50 KiB and ended at 14.00 KiB: ...",
+  "timestampsNs": [33421, 66842, ...],
+  "liveBytes":    [4608,  4608,  ...],
+  "liveBlocks":   [9,     9,     ...]
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `peakBytes` / `peakBlocks` | number | high-water mark, and how many blocks made it up |
+| `peakAtNs` | number | when the peak happened, from process start |
+| `turnover` | number | `totalBytesAllocated / peakBytes` — how hard the program recycles |
+| `endedNearPeak` | boolean | ended holding ≥90% of its peak: memory went up and stayed up |
+| `truncated` | boolean | **read this before plotting** — see below |
+| `coverage` | number | fraction of the run the samples cover; `1.0` unless truncated |
+| `summary` | string | one line of plain language about the shape |
+| `timestampsNs`, `liveBytes`, `liveBlocks` | array | the samples, always the same length |
+
+**Parallel arrays, not an array of objects.** A timeline is up to 120 samples of three numbers;
+repeating the key names 120 times triples the size of the section for nothing a consumer gains.
+The three arrays are index-aligned and always equal in length.
+
+**`peakBytes` is tracked per event, not per sample.** A spike that rises and falls between two
+samples still sets the peak, so `max(liveBytes)` can be lower than `peakBytes`. That is not a bug:
+the samples are what to plot, `peakBytes` is what actually happened.
+
+### `truncated` is not a detail
+
+Events are capped at 2,000,000 (allocation *and* free each count as one). Past that the timeline
+covers only the beginning of the run, and `truncated` is `true`.
+
+This matters more than an ordinary cap because of *how* it fails. A truncated series shows memory
+rising and then going flat — which is exactly what "the leak stopped" looks like. A consumer that
+plots the samples without checking this flag will draw a reassuring chart of a leaking program.
+
+When `truncated` is `true`, `endedNearPeak` is always `false`: the tail is missing, so the claim
+would be about samples that do not exist. Use `coverage` to label the axis honestly.
+
 ## `mismatchedFrees`
 
 A block released through an entry point that does not pair with the one that allocated it —

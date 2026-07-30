@@ -119,6 +119,61 @@ json JsonReportGenerator::toJson(const analysis::LeakReport& report) {
         {"clean", report.clean()},
     };
 
+    if (!report.hotSpots.empty()) {
+        nlohmann::json spots = nlohmann::json::array();
+        for (const analysis::HotSpot& spot : report.hotSpots) {
+            spots.push_back({
+                {"function", spot.function},
+                {"module", spot.module},
+                {"location", spot.location},
+                {"totalBytes", spot.totalBytes},
+                {"count", spot.count},
+                {"averageBytes", spot.averageBytes()},
+                {"peakLiveBytes", spot.peakLiveBytes},
+                {"turnover", spot.turnover()},
+                // Zero here with a large totalBytes is the interesting case:
+                // a site that moved a lot of memory and leaked none of it.
+                {"liveBytes", spot.liveBytes},
+                {"liveCount", spot.liveCount},
+            });
+        }
+        document["hotSpots"] = std::move(spots);
+        document["hotSpotsTruncated"] = report.hotSpotsTruncated;
+    }
+
+    // Additive, so schemaVersion stays where it is -- see docs/REPORT_FORMAT.md.
+    if (!report.timeline.empty()) {
+        const analysis::MemoryTimeline& timeline = report.timeline;
+
+        // Parallel arrays rather than an array of objects. A timeline is 120
+        // samples of three numbers; repeating the key names 120 times triples
+        // the file for nothing a consumer gains.
+        nlohmann::json timestamps = nlohmann::json::array();
+        nlohmann::json liveBytes = nlohmann::json::array();
+        nlohmann::json liveBlocks = nlohmann::json::array();
+        for (const analysis::MemorySample& sample : timeline.samples) {
+            timestamps.push_back(sample.timestampNs);
+            liveBytes.push_back(sample.liveBytes);
+            liveBlocks.push_back(sample.liveBlocks);
+        }
+
+        document["timeline"] = {
+            {"peakBytes", timeline.peakBytes},
+            {"peakBlocks", timeline.peakBlocks},
+            {"peakAtNs", timeline.peakAtNs},
+            {"turnover", timeline.turnover},
+            {"endedNearPeak", timeline.endedNearPeak},
+            // A consumer that plots the samples without reading this will draw
+            // a flat tail that means "no more data", not "memory levelled off".
+            {"truncated", timeline.truncated},
+            {"coverage", timeline.coverage},
+            {"summary", timeline.summary()},
+            {"timestampsNs", std::move(timestamps)},
+            {"liveBytes", std::move(liveBytes)},
+            {"liveBlocks", std::move(liveBlocks)},
+        };
+    }
+
     json groups = json::array();
     for (const analysis::LeakGroup& group : report.groups) {
         groups.push_back({

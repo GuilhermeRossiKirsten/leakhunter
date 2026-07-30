@@ -96,6 +96,7 @@ contains only POD structs and `<cstdint>`. Nothing else crosses the boundary.
 | **LeakAnalyzer** | Blame a frame, group, sort, filter | do I/O |
 | **SuppressionSet** | Parse rules, match a stack against them | know what a leak *is* |
 | **LeakTriage** | Classify a site by time, advise, suggest a rule | do I/O, or read a clock |
+| **MemoryTimeline** | Replay the deltas into live-bytes-over-time | know what leaked, or why |
 | **SourceSnippetReader** | (file, line) → the surrounding source text | know what a leak *is* |
 | **DiagnosticsWriter** | Render findings as compiler diagnostics | do analysis |
 | **ReportGenerator** | Render one format | change the data |
@@ -540,7 +541,8 @@ LeakHunter/
 ├── CMakeLists.txt
 ├── cmake/                      # dependency resolution, FindLibunwind, warnings
 ├── include/leakhunter/
-│   ├── analysis/               # ILeakAnalyzer, LeakAnalyzer, LeakReport, SuppressionSet
+│   ├── analysis/               # ILeakAnalyzer, LeakAnalyzer, LeakReport, SuppressionSet,
+│   │                           #   LeakTriage, MemoryTimeline
 │   ├── app/                    # Application
 │   ├── cli/                    # Options, CommandLineParser
 │   ├── core/                   # Types, Error, Logger, Glob, AgentLocator, ScopedTempFile

@@ -330,6 +330,83 @@ void LeakAnalyzer::addMismatches(LeakReport& report,
     }
 }
 
+void LeakAnalyzer::rankHotSpots(LeakReport& report, std::vector<AllocationSite> sites,
+                                std::size_t keep) const {
+    if (sites.empty() || keep == 0) {
+        return;
+    }
+
+    // The registry keys sites by the whole call stack, because it has no
+    // symbols to key on anything better. That splits one function called from
+    // three places into three rows with the same name and no way to tell them
+    // apart, so merge them here on the same key the leak groups use: developers
+    // think "makeRawBuffer allocated 1.1 MiB", not "makeRawBuffer as reached
+    // from A allocated 500 KiB".
+    //
+    // Every site is symbolised to do that, which is cheap: the DWARF pass
+    // already ran over these program counters during trace replay, so
+    // resolveAll() is hash lookups against a table that is already built.
+    std::unordered_map<std::string, std::size_t> keyToIndex;
+
+    for (AllocationSite& site : sites) {
+        StackTrace trace = resolver_.resolveAll(site.callStack);
+        const std::size_t blamed = findResponsibleFrame(trace);
+        const StackFrame* frame = blamed < trace.size() ? &trace[blamed] : nullptr;
+
+        const std::string key =
+            groupKey(frame, site.callStack.empty() ? 0 : site.callStack.front());
+
+        auto [position, inserted] = keyToIndex.try_emplace(key, report.hotSpots.size());
+        if (inserted) {
+            HotSpot spot;
+            if (frame != nullptr) {
+                spot.function = frame->displayName();
+                spot.module = frame->module;
+                if (frame->preciseName()) {
+                    spot.location = fmt::format("{}:{}", frame->file, frame->line);
+                } else if (!frame->module.empty()) {
+                    spot.location =
+                        fmt::format("{}+0x{:x}", frame->module, frame->moduleOffset());
+                }
+            } else {
+                spot.function = "<unknown>";
+            }
+            spot.representativeTrace = std::move(trace);
+            spot.blamedFrame = blamed;
+            report.hotSpots.push_back(std::move(spot));
+        }
+
+        HotSpot& spot = report.hotSpots[position->second];
+        spot.totalBytes += site.totalBytes;
+        spot.count += site.count;
+        spot.liveBytes += site.liveBytes;
+        spot.liveCount += site.liveCount;
+
+        // Summed, not maxed. Two call paths into one function can hold their
+        // blocks at the same time, so the site's true high-water mark is at
+        // most the sum -- and taking the max would report less memory than the
+        // site demonstrably held.
+        spot.peakLiveBytes += site.peakLiveBytes;
+    }
+
+    std::sort(report.hotSpots.begin(), report.hotSpots.end(),
+              [](const HotSpot& lhs, const HotSpot& rhs) {
+                  if (lhs.totalBytes != rhs.totalBytes) {
+                      return lhs.totalBytes > rhs.totalBytes;
+                  }
+                  // Ties broken deterministically, so two runs of the same
+                  // program produce the same report.
+                  if (lhs.count != rhs.count) {
+                      return lhs.count > rhs.count;
+                  }
+                  return lhs.function < rhs.function;
+              });
+
+    if (report.hotSpots.size() > keep) {
+        report.hotSpots.resize(keep);
+    }
+}
+
 void LeakAnalyzer::buildGroups(LeakReport& report) const {
     std::unordered_map<std::string, std::size_t> keyToIndex;
     std::vector<std::unordered_set<std::uint64_t>> threadsPerGroup;

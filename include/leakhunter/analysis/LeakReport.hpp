@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "leakhunter/analysis/LeakTriage.hpp"
+#include "leakhunter/analysis/MemoryTimeline.hpp"
 #include "leakhunter/core/Types.hpp"
 
 namespace leakhunter::analysis {
@@ -81,9 +82,52 @@ struct LeakGroup {
     std::vector<std::size_t> leakIndices;  ///< into LeakReport::leaks
 };
 
+/// A call site ranked by how much memory passed through it, leaked or not.
+///
+/// Deliberately not a leak. A function that allocates 4 GiB across a run and
+/// releases every byte is invisible to a leak report and is often the most
+/// expensive thing in the profile -- and the fix (reserve, pool, reuse) has
+/// nothing to do with ownership.
+struct HotSpot {
+    std::string function;
+    std::string module;
+    std::string location;  ///< "file:line" when known
+    StackTrace representativeTrace;
+    std::size_t blamedFrame = 0;
+
+    std::uint64_t totalBytes = 0;     ///< ever allocated here
+    std::uint64_t count = 0;          ///< allocations, including freed ones
+    std::uint64_t peakLiveBytes = 0;  ///< most this site held at one moment
+    std::uint64_t liveBytes = 0;      ///< still outstanding at exit
+    std::uint64_t liveCount = 0;
+
+    /// Bytes allocated per byte ever held at once, for this site alone.
+    /// High means the site churns; the memory is going back, repeatedly.
+    [[nodiscard]] double turnover() const noexcept {
+        return peakLiveBytes == 0 ? 0.0
+                                  : static_cast<double>(totalBytes) /
+                                        static_cast<double>(peakLiveBytes);
+    }
+
+    [[nodiscard]] std::uint64_t averageBytes() const noexcept {
+        return count == 0 ? 0 : totalBytes / count;
+    }
+};
+
 struct LeakReport {
     SessionStats stats;
     ProcessResult process;
+
+    /// How much memory the target held as it ran, rather than what it was left
+    /// holding at the end. Empty when the timeline was not collected.
+    MemoryTimeline timeline;
+
+    /// Where the memory went, leaked or not. Sorted by totalBytes, descending.
+    std::vector<HotSpot> hotSpots;
+
+    /// True when more distinct call sites existed than could be tracked, so
+    /// the ranking is biased towards sites that appeared early in the run.
+    bool hotSpotsTruncated = false;
 
     std::vector<Leak> leaks;        ///< sorted by size, descending
     std::vector<LeakGroup> groups;  ///< sorted by totalBytes, descending
