@@ -68,6 +68,20 @@ constexpr std::array<std::string_view, 8> kCandidateTools{
     return quoted;
 }
 
+/// True for a line the symbolizer wrote to complain rather than to answer.
+///
+/// This check exists because its absence hid a real bug for a long time: the
+/// invocation used `--inlines=false --demangle=false`, which llvm-symbolizer
+/// rejects outright ("unknown argument"). stderr went to /dev/null, the output
+/// was empty, and every frame silently fell back to what dladdr could see --
+/// which is nothing for a `static` function. The tool's headline capability was
+/// broken on exactly the machines that had the preferred symbolizer installed.
+[[nodiscard]] bool looksLikeDiagnostic(std::string_view line) {
+    return line.starts_with("error:") || line.starts_with("warning:") ||
+           line.find("unknown argument") != std::string_view::npos ||
+           line.find("Unknown command line argument") != std::string_view::npos;
+}
+
 [[nodiscard]] std::vector<std::string> runCommand(const std::string& command) {
     std::vector<std::string> lines;
 
@@ -95,7 +109,12 @@ constexpr std::array<std::string_view, 8> kCandidateTools{
 }
 
 /// Parses "path/to/file.cpp:42" and "path/to/file.cpp:42:7".
-[[nodiscard]] bool parseLocation(std::string_view text, std::string& file, std::uint32_t& line) {
+///
+/// The column is kept, not discarded: it is what lets a report point a caret at
+/// the exact call rather than underlining a whole line. addr2line does not emit
+/// one, so @p column stays 0 there and callers fall back to the whole line.
+[[nodiscard]] bool parseLocation(std::string_view text, std::string& file, std::uint32_t& line,
+                                 std::uint32_t& column) {
     if (text.empty() || text.starts_with("??")) {
         return false;
     }
@@ -114,7 +133,9 @@ constexpr std::array<std::string_view, 8> kCandidateTools{
         return false;
     }
 
-    // "file:line:column" -- drop the column and re-target the line field.
+    // Two numeric tails means "file:line:column": the one just parsed is the
+    // column, and the line is the field before it.
+    std::uint32_t parsedColumn = 0;
     if (const std::size_t secondColon = head.rfind(':'); secondColon != std::string_view::npos) {
         const std::string_view maybeLine = head.substr(secondColon + 1);
         std::uint32_t lineCandidate = 0;
@@ -122,6 +143,7 @@ constexpr std::array<std::string_view, 8> kCandidateTools{
             std::from_chars(maybeLine.data(), maybeLine.data() + maybeLine.size(), lineCandidate);
         if (e2 == std::errc{} && p2 == maybeLine.data() + maybeLine.size()) {
             head = head.substr(0, secondColon);
+            parsedColumn = parsed;
             parsed = lineCandidate;
         }
     }
@@ -132,6 +154,7 @@ constexpr std::array<std::string_view, 8> kCandidateTools{
 
     file.assign(head);
     line = parsed;
+    column = parsedColumn;
     return true;
 }
 
@@ -170,11 +193,20 @@ std::vector<SourceLineResolver::Resolution> SourceLineResolver::query(
 
         std::string command = tool_;
         if (isLlvmSymbolizer_) {
-            // --inlines=false keeps it to exactly two lines per address, which
-            // is what the pairing below relies on. Names stay mangled so that
-            // demangling happens in one place: SymbolResolver::demangle.
+            // Disabling inlining is load-bearing: it is what keeps the output to
+            // exactly two lines per address, which the pairing below relies on.
+            //
+            // Both spellings here are the documented *aliases*, chosen on
+            // purpose. The canonical modern forms are `--no-inlines` and
+            // `--no-demangle`, but the aliases exist for backward compatibility
+            // and so work across the llvm-symbolizer versions in kCandidateTools.
+            // `--inlines=false` and `--demangle=false`, which this used to send,
+            // are accepted by neither -- see looksLikeDiagnostic above.
+            //
+            // Names stay mangled so demangling happens in one place:
+            // SymbolResolver::demangle.
             command += fmt::format(
-                " --obj={} --functions=linkage --inlines=false --demangle=false"
+                " --obj={} --functions=linkage --inlining=false -demangle=false"
                 " --output-style=LLVM",
                 shellQuote(module));
         } else {
@@ -184,11 +216,27 @@ std::vector<SourceLineResolver::Resolution> SourceLineResolver::query(
         for (std::size_t i = start; i < stop; ++i) {
             command += fmt::format(" 0x{:x}", addresses[i]);
         }
-        command += " 2>/dev/null";
+
+        // stderr is merged in rather than discarded. Discarding it is how a
+        // broken invocation looked exactly like a stripped binary.
+        command += " 2>&1";
 
         // Both tools emit two non-empty lines per address: the function name,
         // then the source location.
-        const std::vector<std::string> output = runCommand(command);
+        std::vector<std::string> output = runCommand(command);
+
+        const auto firstDiagnostic =
+            std::find_if(output.begin(), output.end(),
+                         [](const std::string& line) { return looksLikeDiagnostic(line); });
+        if (firstDiagnostic != output.end()) {
+            // Do not try to salvage a partial answer: the line pairing would be
+            // off by however many diagnostics appeared, and quietly mis-pairing
+            // names to locations is worse than having none.
+            log::warn("'{}' rejected our invocation: {} -- frames will only have what dladdr "
+                      "provided. Please report this with your symbolizer version.",
+                      tool_, *firstDiagnostic);
+            return results;
+        }
 
         for (std::size_t i = start; i < stop; ++i) {
             const std::size_t functionIndex = (i - start) * 2;
@@ -202,7 +250,8 @@ std::vector<SourceLineResolver::Resolution> SourceLineResolver::query(
             }
             // A missing location is normal (no debug info); the name alone is
             // still worth keeping.
-            (void)parseLocation(output[functionIndex + 1], results[i].file, results[i].line);
+            (void)parseLocation(output[functionIndex + 1], results[i].file, results[i].line,
+                                results[i].column);
         }
     }
 
@@ -261,12 +310,22 @@ std::size_t SourceLineResolver::enrich(SymbolResolver& resolver) const {
                 continue;
             }
             resolver.addResolution(programCounters[i], resolutions[i].function,
-                                   resolutions[i].file, resolutions[i].line);
+                                   resolutions[i].file, resolutions[i].line,
+                                   resolutions[i].column);
             ++enriched;
         }
     }
 
-    log::debug("enriched {} call sites with '{}'", enriched, tool_);
+    if (enriched == 0) {
+        // The observable symptom of a symbolizer that is present but unusable.
+        // Saying so beats letting the user conclude their binary is stripped.
+        log::warn("'{}' resolved nothing; every frame will show only what dladdr provided. "
+                  "A stripped target explains this -- so does a symbolizer that rejected our "
+                  "arguments (run with --verbose).",
+                  tool_);
+    } else {
+        log::debug("enriched {} call sites with '{}'", enriched, tool_);
+    }
     return enriched;
 }
 

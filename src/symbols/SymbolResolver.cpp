@@ -114,7 +114,7 @@ void SymbolResolver::observe(std::uint64_t programCounter) {
 }
 
 void SymbolResolver::addResolution(std::uint64_t programCounter, const std::string& function,
-                                   std::string file, std::uint32_t line) {
+                                   std::string file, std::uint32_t line, std::uint32_t column) {
     const auto it = symbols_.find(programCounter);
     if (it == symbols_.end()) {
         return;
@@ -126,6 +126,7 @@ void SymbolResolver::addResolution(std::uint64_t programCounter, const std::stri
     if (!file.empty() && line > 0) {
         it->second.file = std::move(file);
         it->second.line = line;
+        it->second.column = column;
     }
 }
 
@@ -150,6 +151,7 @@ StackFrame SymbolResolver::resolve(std::uint64_t programCounter) const {
     frame.module = entry.module;
     frame.file = entry.file;
     frame.line = entry.line;
+    frame.column = entry.column;
     frame.resolved = !entry.function.empty() || !entry.module.empty();
     return frame;
 }

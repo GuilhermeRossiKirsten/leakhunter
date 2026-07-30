@@ -15,8 +15,10 @@ add_library(leakhunter_core STATIC
     core/Types.cpp
     process/PosixProcessRunner.cpp
     registry/AllocationRegistry.cpp
+    report/DiagnosticsWriter.cpp
     report/HtmlReportGenerator.cpp
     report/JsonReportGenerator.cpp
+    source/SourceSnippetReader.cpp
     symbols/SourceLineResolver.cpp
     symbols/SymbolResolver.cpp
     tracker/FileTraceSource.cpp

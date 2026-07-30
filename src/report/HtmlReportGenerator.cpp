@@ -117,6 +117,15 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: now
 tr.detail > td { padding: 0; background: var(--surface-alt); }
 tr.detail.hidden { display: none; }
 section.hidden { display: none; }
+.snippet { margin: 0 0 .85rem; border: 1px solid var(--border); border-radius: 8px; overflow-x: auto; background: var(--surface-alt); }
+.snippet .path { padding: .3rem .7rem; border-bottom: 1px solid var(--border); color: var(--muted); font-family: var(--mono); font-size: .74rem; }
+.snippet table { border: 0; margin: 0; width: auto; min-width: 100%; background: transparent; }
+.snippet td { border: 0; padding: .04rem .7rem .04rem 0; font-family: var(--mono); font-size: .78rem; white-space: pre; vertical-align: baseline; }
+.snippet td.ln { padding: .04rem .7rem; text-align: right; color: var(--muted); user-select: none; border-right: 1px solid var(--border); width: 1%; }
+.snippet tr.blamed { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.snippet tr.blamed td.ln { color: var(--danger); font-weight: 600; }
+.snippet tr.caret td { color: var(--danger); font-weight: 600; }
+.snippet .note { color: var(--danger); font-weight: 600; }
 .ub { border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border)); background: color-mix(in srgb, var(--danger) 8%, transparent); border-radius: 10px; padding: .8rem 1rem; margin-bottom: .7rem; }
 .ub .what { font-weight: 600; color: var(--danger); font-size: .9rem; }
 .ub .meta { color: var(--muted); font-size: .8rem; margin: .15rem 0 .4rem; font-family: var(--mono); }
@@ -158,6 +167,38 @@ constexpr std::string_view kScript = R"JS(
     '<ol class="stack">' +
     trace.map((f, i) => frameHtml(f, i === blamedIndex)).join('') +
     '</ol>';
+
+  // The blamed line in its source context, with that line highlighted.
+  //
+  // Every line of code goes through escapeHtml. Source is full of <, > and &,
+  // and this is user code being placed into markup -- getting it wrong here
+  // would be HTML injection from the file being analysed.
+  const snippetHtml = (snippet, note) => {
+    if (!snippet || !snippet.lines || snippet.lines.length === 0) return '';
+
+    const first = snippet.firstLine;
+    const blamed = snippet.blamedLine;
+    const rows = snippet.lines.map((line, i) => {
+      const number = first + i;
+      const isBlamed = number === blamed;
+      let html = '<tr' + (isBlamed ? ' class="blamed"' : '') + '>' +
+                 '<td class="ln">' + number + '</td>' +
+                 '<td>' + escapeHtml(line) + '</td></tr>';
+      if (isBlamed) {
+        // A caret row under the blamed line, at the column when we have one.
+        const column = snippet.column || 0;
+        const pad = column > 0 ? column - 1 : (line.length - line.replace(/^\s+/, '').length);
+        const mark = column > 0 ? '^' : '~'.repeat(Math.max(1, line.trim().length));
+        html += '<tr class="caret"><td class="ln"></td><td>' +
+                ' '.repeat(Math.max(0, pad)) + mark +
+                (note ? '  ' + escapeHtml(note) : '') + '</td></tr>';
+      }
+      return html;
+    }).join('');
+
+    return '<div class="snippet"><div class="path">' + escapeHtml(snippet.file) +
+           '</div><table>' + rows + '</table></div>';
+  };
 
   const tbody = document.getElementById('groups-body');
   let sortKey = 'totalBytes';
@@ -210,6 +251,10 @@ constexpr std::string_view kScript = R"JS(
           '<td class="num">' + group.frameCount + ' frames</td>' +
         '</tr>' +
         '<tr class="detail hidden" id="detail-' + index + '"><td colspan="5">' +
+          // Source first, stack second: the line is the answer, the stack is
+          // the evidence for it.
+          snippetHtml(group.snippet,
+                      group.count + ' leak(s), ' + bytes(group.totalBytes) + ' here') +
           stackHtml(group.stackTrace || [], blamed) +
         '</td></tr>';
     }).join('');
@@ -255,6 +300,7 @@ constexpr std::string_view kScript = R"JS(
           '<div class="what">' + escapeHtml(m.description) + '</div>' +
           '<div class="meta">' + bytes(m.size) + ' at ' + escapeHtml(m.address) +
             ' &middot; ' + escapeHtml(threads) + '</div>' +
+          snippetHtml(m.snippet, 'allocated here') +
           stackHtml(m.stackTrace || [], blamed) +
         '</div>';
     }).join('');

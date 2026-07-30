@@ -48,7 +48,7 @@ public:
     /// the dynamic symbol table -- so most application frames arrive nameless
     /// and are named here.
     void addResolution(std::uint64_t programCounter, const std::string& function,
-                       std::string file, std::uint32_t line);
+                       std::string file, std::uint32_t line, std::uint32_t column = 0);
 
     /// True when @p programCounter still has no function name.
     [[nodiscard]] bool needsFunctionName(std::uint64_t programCounter) const;
@@ -74,6 +74,7 @@ private:
         std::string module;
         std::string file;
         std::uint32_t line = 0;
+        std::uint32_t column = 0;
     };
 
     /// Finds the loaded object containing @p programCounter, or nullptr.

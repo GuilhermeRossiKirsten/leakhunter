@@ -67,7 +67,24 @@ OPTIONS
                            Format: docs/USAGE.md.
         --strict-suppressions
                            Exit 2 if any suppression rule matched nothing
-        --no-source        Skip file:line resolution (do not run llvm-symbolizer)
+        --no-source        Skip file:line resolution (do not run llvm-symbolizer).
+                           Implies --no-source-snippets: with no file:line there
+                           is nothing to read.
+        --no-source-snippets
+                           Do not read source files. By default the reports embed
+                           the blamed lines, which means report.html contains
+                           excerpts of your code -- turn this off if the report
+                           is going somewhere the source should not.
+        --snippet-context <n>
+                           Lines of source context on each side (default: 4,
+                           max: 32)
+        --source-root <dir>
+                           Where to look for sources whose recorded path does not
+                           exist here, e.g. a report generated on a different
+                           machine from the build. Repeatable.
+        --diagnostics      Also write compiler-style findings to stderr, so an
+                           editor can jump to them. Becomes GitHub Actions
+                           annotations automatically when $GITHUB_ACTIONS is set.
         --no-mismatch-check
                            Do not report blocks released through the wrong entry
                            point (`new[]` freed with `delete`). The check needs
@@ -163,6 +180,27 @@ Result<Options> CommandLineParser::parse(std::span<const std::string_view> args)
             formatSelected = true;
         } else if (token == "--no-source") {
             options.resolveSourceLocations = false;
+            // Without file:line there is nothing to open, so the snippets go
+            // too. Making that implicit here means the two flags can never be
+            // left in a combination that promises source and cannot deliver it.
+            options.sourceSnippets = false;
+        } else if (token == "--no-source-snippets") {
+            options.sourceSnippets = false;
+        } else if (token == "--snippet-context") {
+            auto value = takeValue(token);
+            if (!value) return value.error();
+            std::uint32_t context = 0;
+            if (!parseUnsigned(value.value(), context) || context > 32) {
+                return Error{fmt::format("--snippet-context expects 0..32, got '{}'",
+                                         value.value())};
+            }
+            options.snippetContext = context;
+        } else if (token == "--source-root") {
+            auto value = takeValue(token);
+            if (!value) return value.error();
+            options.sourceRoots.emplace_back(std::string{value.value()});
+        } else if (token == "--diagnostics") {
+            options.emitDiagnostics = true;
         } else if (token == "--no-mismatch-check") {
             options.detectMismatchedFrees = false;
         } else if (token == "--suppressions") {

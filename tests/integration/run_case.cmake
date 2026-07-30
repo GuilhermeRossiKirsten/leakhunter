@@ -23,6 +23,10 @@
 #   EXPECT_MISMATCH_FUNCTION
 #                         a function name that must appear among the mismatches
 #   EXPECT_EXIT           the exit code leakhunter itself must return
+#   EXPECT_SNIPPET_CONTAINS
+#                         text that must appear on the blamed line of some group's
+#                         source snippet
+#   EXPECT_NO_SNIPPETS    1 if no group may carry a snippet
 #   EXPECT_SUPPRESSED     exact number of leaks suppressed by rules
 #   EXPECT_UNUSED_RULES   exact number of suppression rules that matched nothing
 #   EXTRA_ARGS            additional leakhunter flags (semicolon separated)
@@ -181,6 +185,53 @@ if(DEFINED EXPECT_MISMATCHES AND NOT mismatchCount EQUAL EXPECT_MISMATCHES)
     endif()
     message(FATAL_ERROR "expected ${EXPECT_MISMATCHES} mismatched frees, got ${mismatchCount}"
                         " (${descriptions})")
+endif()
+
+# --- source snippets -------------------------------------------------------
+#
+# Collect the blamed line of every group's snippet. Reaching this at all means
+# the whole chain worked: interception, unwinding, DWARF symbolisation, and
+# reading the file back off disk.
+
+# Checked inside the loop rather than collected into a list first: source lines
+# are full of semicolons, and CMake would split every one of them into separate
+# list elements.
+
+set(snippetCount 0)
+set(snippetMatchFound FALSE)
+if(groupCount GREATER 0)
+    math(EXPR lastIndex "${groupCount} - 1")
+    foreach(index RANGE ${lastIndex})
+        string(JSON snippet ERROR_VARIABLE noSnippet GET "${report}" groups ${index} snippet)
+        if(NOT noSnippet STREQUAL "NOTFOUND")
+            continue()
+        endif()
+
+        math(EXPR snippetCount "${snippetCount} + 1")
+        string(JSON firstLine GET "${snippet}" firstLine)
+        string(JSON blamedLine GET "${snippet}" blamedLine)
+        math(EXPR offset "${blamedLine} - ${firstLine}")
+        string(JSON blamedText GET "${snippet}" lines ${offset})
+
+        message(STATUS "  snippet blames line ${blamedLine}: ${blamedText}")
+
+        if(DEFINED EXPECT_SNIPPET_CONTAINS)
+            string(FIND "${blamedText}" "${EXPECT_SNIPPET_CONTAINS}" position)
+            if(NOT position EQUAL -1)
+                set(snippetMatchFound TRUE)
+            endif()
+        endif()
+    endforeach()
+endif()
+
+message(STATUS "snippets: ${snippetCount} of ${groupCount} group(s)")
+
+if(DEFINED EXPECT_SNIPPET_CONTAINS AND NOT snippetMatchFound)
+    message(FATAL_ERROR "no snippet's blamed line contains '${EXPECT_SNIPPET_CONTAINS}'")
+endif()
+
+if(DEFINED EXPECT_NO_SNIPPETS AND NOT snippetCount EQUAL 0)
+    message(FATAL_ERROR "expected no snippets, got ${snippetCount}")
 endif()
 
 # --- suppressions ----------------------------------------------------------

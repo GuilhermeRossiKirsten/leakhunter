@@ -167,6 +167,43 @@ LH_TEST(Cli, strict_suppressions_is_opt_in) {
     LH_CHECK(parse({"--strict-suppressions", "./app"}).value().strictSuppressions);
 }
 
+LH_TEST(Cli, source_snippets_are_on_by_default) {
+    LH_CHECK(parse({"./app"}).value().sourceSnippets);
+    LH_CHECK(!parse({"--no-source-snippets", "./app"}).value().sourceSnippets);
+}
+
+LH_TEST(Cli, no_source_also_turns_off_snippets) {
+    // Without file:line there is nothing to open, so the two flags can never be
+    // left in a combination that promises source and cannot deliver it.
+    const auto options = parse({"--no-source", "./app"}).value();
+    LH_CHECK(!options.resolveSourceLocations);
+    LH_CHECK(!options.sourceSnippets);
+}
+
+LH_TEST(Cli, snippet_context_is_parsed_and_bounded) {
+    LH_CHECK_EQ(parse({"--snippet-context", "8", "./app"}).value().snippetContext,
+                std::uint32_t{8});
+    LH_CHECK_EQ(parse({"--snippet-context", "0", "./app"}).value().snippetContext,
+                std::uint32_t{0});
+    LH_CHECK(!parse({"--snippet-context", "33", "./app"}).hasValue());
+    LH_CHECK(!parse({"--snippet-context", "lots", "./app"}).hasValue());
+    LH_CHECK(!parse({"--snippet-context"}).hasValue());
+}
+
+LH_TEST(Cli, source_roots_accumulate_in_order) {
+    const auto options =
+        parse({"--source-root", "/a", "--source-root", "/b", "./app"}).value();
+    LH_CHECK_EQ(options.sourceRoots.size(), std::size_t{2});
+    LH_CHECK_EQ(options.sourceRoots[0].string(), std::string{"/a"});
+    LH_CHECK_EQ(options.sourceRoots[1].string(), std::string{"/b"});
+    LH_CHECK(!parse({"--source-root"}).hasValue());
+}
+
+LH_TEST(Cli, diagnostics_is_opt_in) {
+    LH_CHECK(!parse({"./app"}).value().emitDiagnostics);
+    LH_CHECK(parse({"--diagnostics", "./app"}).value().emitDiagnostics);
+}
+
 LH_TEST(Cli, trace_file_implies_keeping_it) {
     auto result = parse({"--trace-file", "/tmp/x.lhtrace", "./app"});
     LH_CHECK(result.hasValue());

@@ -52,6 +52,7 @@ struct StackFrame {
     std::string module;              ///< path of the owning shared object / executable
     std::string file;                ///< source file, when debug info is available
     std::uint32_t line = 0;          ///< source line, 0 when unknown
+    std::uint32_t column = 0;        ///< source column, 0 when unknown
     bool resolved = false;           ///< false => only a raw address is known
 
     /// Distance from the start of the named symbol.
@@ -84,6 +85,31 @@ struct StackFrame {
 };
 
 using StackTrace = std::vector<StackFrame>;
+
+/// A window of source text around the line blamed for a finding.
+///
+/// Filled in by source::SourceSnippetReader after analysis, from the `file` and
+/// `line` the DWARF pass recovered. Always optional: a missing source file is
+/// normal (a release build on another machine, a vendored library) and leaves
+/// the finding exactly as informative as it was before.
+struct SourceSnippet {
+    std::string file;              ///< path as resolved on *this* machine
+    std::uint32_t firstLine = 0;   ///< line number of lines[0], 1-based
+    std::uint32_t blamedLine = 0;  ///< the line to highlight
+    std::uint32_t column = 0;      ///< 1-based column of the call, 0 if unknown
+    std::vector<std::string> lines;
+
+    [[nodiscard]] bool empty() const noexcept { return lines.empty(); }
+
+    /// Index of the blamed line within `lines`, or npos when out of range.
+    [[nodiscard]] std::size_t blamedIndex() const noexcept {
+        if (blamedLine < firstLine) {
+            return static_cast<std::size_t>(-1);
+        }
+        const std::size_t offset = blamedLine - firstLine;
+        return offset < lines.size() ? offset : static_cast<std::size_t>(-1);
+    }
+};
 
 /// A single tracked allocation.
 ///
@@ -128,6 +154,7 @@ struct MismatchedFree {
     std::vector<std::uint64_t> callStack;  ///< raw PCs of the allocation site
     StackTrace trace;                      ///< filled in by the analyser
     std::size_t responsibleFrame = 0;
+    SourceSnippet snippet;                 ///< the allocation site, in source
 
     [[nodiscard]] const StackFrame* responsible() const noexcept {
         return responsibleFrame < trace.size() ? &trace[responsibleFrame] : nullptr;

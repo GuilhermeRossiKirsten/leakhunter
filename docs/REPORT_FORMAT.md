@@ -116,6 +116,7 @@ every leak regardless.
 | `resolved` | boolean | False means only the raw address is known |
 | `file` | string | *(optional)* Source path, present only with debug info |
 | `line` | number | *(optional)* Source line |
+| `column` | number | *(optional)* 1-based source column. `llvm-symbolizer` reports it; `addr2line` does not, and then the key is absent rather than `0` |
 
 > **`preciseName` is the field to check before trusting `function`.**
 >
@@ -267,6 +268,35 @@ every leak regardless.
 This block is generated from a real run of `examples/simple_leak`, not written by hand, so it
 cannot drift from what the tool actually emits.
 
+## `snippet`
+
+Present on a `groups[]` or `mismatchedFrees[]` entry when the blamed line could be read out of the
+source tree. **Absent, not null**, when it could not — so `"snippet" in group` is a straight answer.
+
+```jsonc
+{
+  "file": "/home/dev/app/poc/src/IndexWorker.cpp",
+  "firstLine": 23,
+  "blamedLine": 27,
+  "column": 60,
+  "lines": [ "/// called from several places...", "..." ]
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `file` | string | Path **as resolved on the machine that generated the report** — which may differ from the frame's `file` when `--source-root` was used |
+| `firstLine` | number | 1-based line number of `lines[0]` |
+| `blamedLine` | number | The line to highlight. Always within `[firstLine, firstLine + lines.length)` |
+| `column` | number | *(optional)* 1-based column of the allocation |
+| `lines` | array | The source text, tabs already expanded, without line endings |
+
+The line to highlight is `lines[blamedLine - firstLine]`. Windows are clamped at both ends of the
+file, so `firstLine` is not always `blamedLine - context`.
+
+Controlled by `--no-source-snippets`, `--snippet-context` and `--source-root`. Off entirely under
+`--no-source`, since with no `file`/`line` there is nothing to read.
+
 ## `mismatchedFrees`
 
 A block released through an entry point that does not pair with the one that allocated it —
@@ -364,7 +394,7 @@ those leaks stay in the totals and are only missing from the listing.
 
 | Version | Change |
 |---|---|
-| 2 | Added `suppressions`, `summary.suppressedByRules`, `summary.suppressedByRulesBytes`, `summary.unusedSuppressionRules`, `mismatchedFrees`, `summary.mismatchedFreeCount`, `summary.suppressedMismatches` and `summary.mismatchDetection`. `summary.clean` now also requires `mismatchedFreeCount == 0`, which is why this is a version bump rather than an additive change. |
+| 2 | Added `snippet` on groups and mismatched frees, and `column` on stack frames — both purely additive, so **no version bump**: a consumer that ignores unknown keys is unaffected, and `summary.clean` did not change meaning. Added `suppressions`, `summary.suppressedByRules`, `summary.suppressedByRulesBytes`, `summary.unusedSuppressionRules`, `mismatchedFrees`, `summary.mismatchedFreeCount`, `summary.suppressedMismatches` and `summary.mismatchDetection`. `summary.clean` now also requires `mismatchedFreeCount == 0`, which is why this is a version bump rather than an additive change. |
 | 1 | Initial format. |
 
 ## Stability guarantees

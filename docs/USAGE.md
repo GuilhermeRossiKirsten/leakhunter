@@ -66,7 +66,10 @@ you are debugging the runtime itself, or when you want the raw "everything live 
 
 | Option | Default | Effect |
 |---|---|---|
-| `--no-source` | off | Skip the DWARF pass entirely |
+| `--no-source` | off | Skip the DWARF pass entirely (implies `--no-source-snippets`) |
+| `--no-source-snippets` | snippets on | Do not read source files at all |
+| `--snippet-context <n>` | `4` | Lines of source context on each side (0–32) |
+| `--source-root <dir>` | — | Where to look for sources whose recorded path is not valid here. Repeatable |
 
 By default LeakHunter looks for `llvm-symbolizer` (then `addr2line`) on `PATH` and uses it to
 recover function names and `file:line`. Without it you still get names for exported symbols, but
@@ -173,6 +176,74 @@ leakhunter: leaks.supp:2: unknown scope 'functoin'. Known scopes: function, modu
 
 A typo in a suppression file silently changes what the tool reports. Finding that out from a CI run
 that passed for the wrong reason is far worse than a startup failure.
+
+## Source snippets
+
+By default the reports show the **blamed line itself**, read out of your source tree:
+
+```
+  200.00 KiB  x100    poc::(anonymous namespace)::indexBatch(unsigned long)
+                      at poc/src/IndexWorker.cpp:27
+                      27 |     auto* scratch = static_cast<unsigned char*>(std::malloc(kScratchBytes));
+                         |                                                            ^
+```
+
+The HTML report shows a window around it with that line highlighted; expand a row to see it.
+
+The caret sits on the exact column when `llvm-symbolizer` provided one. `addr2line` does not report
+columns, so there the whole line is underlined instead — accurate about how much it knows.
+
+> **The HTML report will contain excerpts of your source code.**
+>
+> That is usually what you want, and it is why this is on by default. But it changes what the
+> artifact is: attaching `report.html` to a ticket, or publishing it as a CI artifact, now shares
+> code. `--no-source-snippets` turns it off entirely.
+>
+> There is a second, narrower consideration. Source paths come from the traced binary's debug info,
+> so a binary built from a forged DWARF path could name a file you did not intend to embed. If you
+> are tracing something you did not build, `--source-root <dir>` restricts what can be found, and
+> `--no-source-snippets` removes the question.
+
+### When the source is somewhere else
+
+A report generated on a different machine from the build has recorded paths that do not exist. Point
+`--source-root` at the tree and LeakHunter matches progressively shorter suffixes of the recorded
+path against it, the way `gdb set substitute-path` does:
+
+```console
+# The binary was built at /build/agent/work/1/s, the source is here.
+$ leakhunter --source-root ~/projects/myapp --json ./myapp
+```
+
+Repeat the flag for a monorepo with several trees. If nothing matches, the site simply has no
+snippet and LeakHunter says how many files it could not find.
+
+## Diagnostics for your editor and for CI
+
+`--diagnostics` writes compiler-style lines to **stderr**, which is what an editor's error parser
+reads:
+
+```console
+$ leakhunter --diagnostics ./build/poc/docindex
+poc/src/IndexWorker.cpp:27:60: warning: leak: 100 block(s) leaked here, 200.00 KiB in total, by ... [leakhunter:leak]
+poc/src/DocumentCache.cpp:67:49: warning: mismatched-free: 8 block(s) allocated with new[] here, released with free() -- undefined behaviour (4.00 KiB affected) [leakhunter:mismatched-free]
+```
+
+In vim that is `:cfile`-able; in VS Code it populates the Problems pane. Findings at the same
+location are collapsed into one line with a count, the way a compiler would.
+
+Inside GitHub Actions (`$GITHUB_ACTIONS` set) the format switches automatically to workflow
+commands, which annotate the pull-request diff on the offending line:
+
+```yaml
+- run: leakhunter --diagnostics --json --output artifacts ./build/tests
+```
+
+```
+::warning file=src/IndexWorker.cpp,line=27,col=60,title=leakhunter leak::100 block(s) leaked here...
+```
+
+No flag needed for that: the useful choice in CI is never the one you remembered to pass.
 
 ## Multi-process targets
 

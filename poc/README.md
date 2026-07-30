@@ -53,6 +53,44 @@ Plus 8 mismatched frees, all `allocated with new[], released with free()`, blame
 
 **Exit code 1.** It drops straight into a CI gate.
 
+### And the line itself
+
+The summary shows the blamed line, with a caret on the exact column:
+
+```
+  top leak sites
+    200.00 KiB  x100    poc::(anonymous namespace)::indexBatch(unsigned long)
+                        at poc/src/IndexWorker.cpp:27
+                        27 |     auto* scratch = static_cast<unsigned char*>(std::malloc(kScratchBytes));
+                           |                                                            ^
+    110.94 KiB  x400    poc::buildDocument(long, unsigned long)
+                        at poc/src/DocumentCache.cpp:18
+                        18 |     document->payload = new char[payloadBytes];
+                           |                                              ^
+      1.03 KiB  x200    poc::(anonymous namespace)::duplicateSpan(char const*, char const*)
+                        at poc/src/RecordParser.cpp:18
+                        18 |     char* copy = static_cast<char*>(std::malloc(length + 1));
+                           |                                                ^
+```
+
+In the HTML report, expanding a row shows a window around that line with it highlighted. The caret
+needs a column, which only `llvm-symbolizer` reports — with `addr2line` the whole line is underlined
+instead.
+
+`--diagnostics` emits the same findings in the format your editor can jump to, and that GitHub
+Actions annotates onto a pull-request diff:
+
+```console
+$ leakhunter --diagnostics ./build/poc/docindex
+poc/src/IndexWorker.cpp:27:60: warning: leak: 100 block(s) leaked here, 200.00 KiB in total, by ... [leakhunter:leak]
+poc/src/DocumentCache.cpp:18:46: warning: leak: 400 block(s) leaked here, 110.94 KiB in total, by ... [leakhunter:leak]
+poc/src/RecordParser.cpp:18:48: warning: leak: 200 block(s) leaked here, 1.03 KiB in total, by ... [leakhunter:leak]
+poc/src/DocumentCache.cpp:67:49: warning: mismatched-free: 8 block(s) allocated with new[] here, released with free() -- undefined behaviour (4.00 KiB affected) [leakhunter:mismatched-free]
+```
+
+Note the last line: the 8 mismatched frees are one site, so they collapse into one diagnostic with a
+count. Eight identical annotations on one line of a diff would be noise.
+
 ### Reading the numbers
 
 A few of them deserve a note, because they are the parts people query:
@@ -90,6 +128,16 @@ $ leakhunter --min-leak-size 1024 build/poc/docindex
 # Machine-readable, for a gate.
 $ leakhunter --json build/poc/docindex
 $ jq '.groups[] | {function, count, totalBytes, location}' leakhunter-report/report.json
+
+# The blamed line, straight out of the JSON.
+$ jq -r '.groups[0].snippet | .lines[.blamedLine - .firstLine]' leakhunter-report/report.json
+
+# Findings your editor can jump to (and GitHub Actions annotates).
+$ leakhunter --diagnostics build/poc/docindex
+
+# More or less source context; none at all.
+$ leakhunter --snippet-context 8 build/poc/docindex
+$ leakhunter --no-source-snippets build/poc/docindex
 
 # What it costs: 4829 allocations, so the overhead is invisible here. Turn the
 # frame count down and watch the trace shrink.

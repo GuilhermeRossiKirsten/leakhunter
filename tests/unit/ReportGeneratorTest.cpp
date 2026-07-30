@@ -377,6 +377,102 @@ LH_TEST(HtmlReport, leaks_and_mismatches_are_both_announced) {
     LH_CHECK(html.find("3 mismatched frees") != std::string::npos);
 }
 
+// --- source snippets -------------------------------------------------------
+
+namespace {
+
+leakhunter::SourceSnippet makeSnippet() {
+    leakhunter::SourceSnippet snippet;
+    snippet.file = "/home/dev/app/src/buffer.cpp";
+    snippet.firstLine = 40;
+    snippet.blamedLine = 42;
+    snippet.column = 20;
+    snippet.lines = {"void allocateBuffer() {", "    // grab some room",
+                     "    char* p = (char*)malloc(1024);", "    use(p);", "}"};
+    return snippet;
+}
+
+}  // namespace
+
+LH_TEST(JsonReport, a_snippet_is_serialised_with_its_line_numbers) {
+    LeakReport report = makeReport();
+    report.groups[0].snippet = makeSnippet();
+
+    const nlohmann::json document = JsonReportGenerator::toJson(report);
+    const auto& snippet = document["groups"][0]["snippet"];
+
+    LH_CHECK_EQ(snippet["firstLine"].get<std::uint32_t>(), std::uint32_t{40});
+    LH_CHECK_EQ(snippet["blamedLine"].get<std::uint32_t>(), std::uint32_t{42});
+    LH_CHECK_EQ(snippet["column"].get<std::uint32_t>(), std::uint32_t{20});
+    LH_CHECK_EQ(snippet["lines"].size(), std::size_t{5});
+    LH_CHECK_EQ(snippet["file"].get<std::string>(),
+                std::string{"/home/dev/app/src/buffer.cpp"});
+}
+
+LH_TEST(JsonReport, no_snippet_means_the_key_is_absent_not_null) {
+    // A consumer testing `"snippet" in group` should get a straight answer.
+    const nlohmann::json document = JsonReportGenerator::toJson(makeReport());
+    LH_CHECK(!document["groups"][0].contains("snippet"));
+}
+
+LH_TEST(JsonReport, a_frame_column_appears_only_when_known) {
+    LeakReport report = makeReport();
+    report.groups[0].representativeTrace[0].column = 17;
+
+    const nlohmann::json withColumn = JsonReportGenerator::toJson(report);
+    LH_CHECK_EQ(withColumn["groups"][0]["stackTrace"][0]["column"].get<std::uint32_t>(),
+                std::uint32_t{17});
+
+    // addr2line reports none; a fabricated 0 would be worse than an absent key.
+    const nlohmann::json without = JsonReportGenerator::toJson(makeReport());
+    LH_CHECK(!without["groups"][0]["stackTrace"][0].contains("column"));
+}
+
+LH_TEST(HtmlReport, a_snippet_reaches_the_page_with_its_blamed_line) {
+    LeakReport report = makeReport();
+    report.groups[0].snippet = makeSnippet();
+
+    const std::string html = HtmlReportGenerator::render(report);
+
+    // The data has to be embedded and the CSS that highlights it has to exist,
+    // or the page renders source with nothing marked.
+    LH_CHECK(html.find("\"blamedLine\":42") != std::string::npos);
+    LH_CHECK(html.find("malloc(1024)") != std::string::npos);
+    LH_CHECK(html.find(".snippet tr.blamed") != std::string::npos);
+    LH_CHECK(html.find("snippetHtml") != std::string::npos);
+}
+
+LH_TEST(HtmlReport, source_code_is_escaped_before_it_reaches_the_markup) {
+    // The single most important test of this feature. Source is arbitrary text
+    // read off disk and placed into a page; if it is not escaped, a comment in
+    // the analysed program becomes script in the report.
+    LeakReport report = makeReport();
+    leakhunter::SourceSnippet snippet = makeSnippet();
+    snippet.lines = {"template <class T> struct S;  // a < b && c > d",
+                     "auto* p = new T<int>();  /* </script><script>alert(1)</script> */",
+                     "const char* q = \"quoted\";"};
+    snippet.firstLine = 1;
+    snippet.blamedLine = 2;
+    report.groups[0].snippet = snippet;
+
+    const std::string html = HtmlReportGenerator::render(report);
+
+    // Nothing may close the data element early, and no raw script tag may exist.
+    const std::size_t dataStart = html.find("id=\"leakhunter-data\"");
+    const std::size_t closing = html.find("</script>", dataStart);
+    LH_CHECK(html.substr(dataStart, closing - dataStart).find("</script") == std::string::npos);
+    LH_CHECK(html.find("<script>alert(1)</script>") == std::string::npos);
+}
+
+LH_TEST(HtmlReport, a_mismatched_free_carries_its_snippet_too) {
+    LeakReport report = makeMismatchReport();
+    report.mismatchedFrees[0].snippet = makeSnippet();
+
+    const std::string html = HtmlReportGenerator::render(report);
+    LH_CHECK(html.find("malloc(1024)") != std::string::npos);
+    LH_CHECK(html.find("allocated here") != std::string::npos);
+}
+
 LH_TEST(HtmlReport, is_written_to_disk) {
     const TempDir temp;
     HtmlReportGenerator generator;

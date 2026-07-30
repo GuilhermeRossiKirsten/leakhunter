@@ -95,6 +95,8 @@ contains only POD structs and `<cstdint>`. Nothing else crosses the boundary.
 | **SymbolResolver** | Address → function/file/line | know about leaks |
 | **LeakAnalyzer** | Blame a frame, group, sort, filter | do I/O |
 | **SuppressionSet** | Parse rules, match a stack against them | know what a leak *is* |
+| **SourceSnippetReader** | (file, line) → the surrounding source text | know what a leak *is* |
+| **DiagnosticsWriter** | Render findings as compiler diagnostics | do analysis |
 | **ReportGenerator** | Render one format | change the data |
 | **Core** | Shared value types and utilities | depend on anything above |
 
@@ -274,7 +276,7 @@ would make the parent's own trace claim to be incomplete.
 
 This covers a bare `fork()`, where the child keeps the same image. `fork()` followed by `exec()`
 replaces the image and re-runs the agent's constructor from scratch, wiping the handler's decision
-along with everything else — that is section 10.
+along with everything else — that is section 11.
 
 ### 7b. A target that closes the trace descriptor
 
@@ -339,7 +341,37 @@ the target, while "self" still means the target.
 turn a live block into a phantom leak later, so the free is only recorded when the call actually
 succeeded (or shrank to zero).
 
-### 10. A child process that destroys the parent's trace
+### 10. Showing the leaking line, not just naming it
+
+`file:line` tells you where to look; the snippet shows you. Three renderings share one reader:
+
+```
+SourceSnippetReader ──▶ LeakGroup::snippet ──┬──▶ HTML: window, blamed line highlighted
+  (file, line, column)                       ├──▶ terminal: the line + a caret
+                                             └──▶ --diagnostics: file:line:col: warning:
+```
+
+It runs **after** `analyze()`, from `Application`, for the same reason the DWARF pass does: the
+analyzer decides which frame is to blame and must stay free of I/O, so its unit tests can drive it
+with a fake resolver and no files on disk.
+
+The recorded paths come from the traced binary's debug info, which makes them untrusted input:
+
+- **`is_regular_file` before opening.** A DWARF path naming a FIFO would block for ever — after the
+  target had already exited successfully. This is the limit that would have been a hang, not a bug
+  report.
+- **A file-size cap and a per-report byte budget.** Generated sources run to tens of megabytes and
+  a project with hundreds of sites must not turn `report.html` into a source tarball.
+- **Tabs expanded at read time**, so the column the symbolizer reported agrees with what every
+  renderer shows, and no output depends on anyone's `tab-size`.
+- **Escaped on the way into the page.** Source is arbitrary text being placed into markup; a
+  comment containing `</script>` in the analysed program must not become script in the report.
+
+The column comes from `llvm-symbolizer`, which reports `file:line:column` — `parseLocation` used to
+parse and then throw the column away. `addr2line` does not report one, and there the whole line is
+underlined instead of a caret placed: accurate about how much is known.
+
+### 11. A child process that destroys the parent's trace
 
 Everything the agent needs arrives through the environment, and **every environment variable
 survives `exec()`**. So when a traced program `fork()`s and `exec()`s something, the child's copy of
@@ -384,7 +416,36 @@ does not match the process it launched, as a backstop rather than a primary defe
 dramatically smaller for spawning targets: `g++ -c` went from a 30 MB trace (almost all of it
 orphaned child data that was written and never read) to 58 KB.
 
-### 11. Mismatched frees, and the one configuration that fakes them
+### 12. A symbolizer that was rejecting every invocation
+
+Found while adding source snippets, and it had been there the whole time.
+
+`SourceLineResolver` prefers `llvm-symbolizer` over `addr2line`, and invoked it with
+`--inlines=false --demangle=false`. **llvm-symbolizer accepts neither spelling.** It printed
+`error: unknown argument` and did nothing else — and the command ended in `2>/dev/null`, so:
+
+- the output was empty, which is indistinguishable from a stripped binary;
+- every frame fell back to `dladdr`, which cannot see `static` functions at all;
+- the tool's headline capability was broken **on exactly the machines that had the preferred
+  symbolizer installed**, and worked on the ones that only had `addr2line`.
+
+It survived because the development machine had no `llvm-symbolizer`, so the fallback path was the
+only one ever exercised. Finding it took installing one.
+
+Two changes, and the second matters more than the first:
+
+1. **The right spellings.** `--inlining=false` and `-demangle=false` — deliberately the documented
+   *aliases* rather than the modern `--no-inlines`/`--no-demangle`, because aliases exist for
+   backward compatibility and so span the versions in `kCandidateTools`.
+2. **Stop discarding stderr.** It is now merged into the pipe, and a line that looks like a
+   diagnostic aborts that batch with a warning naming the tool and the message. A batch is never
+   partially salvaged: the output pairing is two lines per address, and an interleaved error message
+   would shift every name onto the wrong location. Silence was the bug; a loud failure is the fix.
+
+`enrich()` also warns when it resolved *nothing at all*, which is the symptom a user actually
+observes.
+
+### 13. Mismatched frees, and the one configuration that fakes them
 
 Pairing "how was this allocated" with "how was it released" is nearly free: `AllocKind` was already
 in every allocation record, and the deallocation record's header had a spare `kind` byte doing
@@ -464,6 +525,7 @@ LeakHunter/
 │   ├── process/                # IProcessRunner, PosixProcessRunner
 │   ├── registry/               # IAllocationRegistry, AllocationRegistry
 │   ├── report/                 # IReportGenerator, Html/Json generators
+│   ├── source/                 # SourceSnippetReader
 │   ├── symbols/                # ISymbolResolver, SymbolResolver, SourceLineResolver
 │   └── tracker/                # ITraceSource, FileTraceSource, MemoryTracker
 ├── src/
@@ -512,6 +574,8 @@ production.
 | `forks_and_closes_fds` | exactly 400 leaks across a bare `fork()` *and* an fd purge; the child's 300 absent |
 | `poc/docindex` | 700 leaks in 3 sites, 8 mismatched frees, one site spanning 4 threads — the numbers its README quotes |
 | `poc/docindex --suppressions` | the worked suppression file still hides exactly its 100 and nothing else |
+| `poc/docindex` snippets | the blamed line read back from disk contains `malloc(kScratchBytes)` — the whole chain, from interception through DWARF to the file |
+| `poc/docindex --no-source-snippets` | zero snippets, everything else identical |
 | `multiple_leaks --suppressions` | 111 leaks become 11; the suppressed site is absent and the other two remain |
 | `multiple_leaks` + suppress-all | exit code 0, and the 112 hidden leaks still counted in `suppressedByRules` |
 | `multiple_leaks` + rotted rule | `--strict-suppressions` turns a rule that matched nothing into exit 2 |

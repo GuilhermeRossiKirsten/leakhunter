@@ -38,6 +38,23 @@ struct Options {
     /// Resolve file:line with llvm-symbolizer when it is on PATH.
     bool resolveSourceLocations = true;
 
+    /// Read the source files and embed the blamed lines in the reports.
+    ///
+    /// On by default, which has one consequence worth stating: report.html then
+    /// contains excerpts of your source, so sharing the artifact shares code.
+    /// `--no-source-snippets` turns it off; `sourceRoots` can confine it.
+    bool sourceSnippets = true;
+
+    /// Lines of context on each side of the blamed line.
+    std::uint32_t snippetContext = 4;
+
+    /// Directories to search when a recorded source path does not exist here --
+    /// a report generated somewhere other than where the target was built.
+    std::vector<std::filesystem::path> sourceRoots;
+
+    /// Also write compiler-style findings to stderr, for editors and CI.
+    bool emitDiagnostics = false;
+
     /// Report blocks released through the wrong entry point (`new[]` freed with
     /// `delete`, and so on). On by default; the escape hatch exists because the
     /// check depends on both halves of the C++ pair being interposed, which a

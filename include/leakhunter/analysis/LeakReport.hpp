@@ -69,6 +69,10 @@ struct LeakGroup {
     /// highlight it without re-deriving the attribution.
     std::size_t blamedFrame = 0;
 
+    /// The blamed line in its source context. One per site, not per leak: 700
+    /// leaks across 3 sites means 3 snippets.
+    SourceSnippet snippet;
+
     std::vector<std::size_t> leakIndices;  ///< into LeakReport::leaks
 };
 

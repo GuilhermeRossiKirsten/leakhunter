@@ -17,6 +17,12 @@ and the interface-based host modules exist so that most of this is additive rath
   hit accounting, and detection of rules that have rotted into matching nothing. The design
   constraint was that suppressed leaks must be *reported* rather than dropped: a leak detector that
   can be made quiet without saying so is one nobody should trust.
+- *Source snippets and diagnostics.* The blamed line shown in the terminal and the HTML report, with
+  a caret on the column, plus `--diagnostics` for editors and GitHub Actions annotations. This entry
+  originally called for reading `compile_commands.json`; that turned out to be unnecessary, because
+  the source path is already in the DWARF the symbolizer reads. Building it also surfaced a
+  long-standing bug: the `llvm-symbolizer` invocation had always been rejected outright, and
+  `2>/dev/null` hid it (see `docs/ARCHITECTURE.md` section 12).
 
 ---
 
@@ -113,7 +119,6 @@ must be documented rather than worked around.
 | **Sampling mode** | Record 1 in N allocations to make production tracing affordable. |
 | **Flame graph output** | The grouped data is already a tree; rendering it as one is mostly presentation. |
 | **Double-free detection** | Harder than the mismatched-free check that shipped, and for one specific reason: a second free of a retired address is indistinguishable from a free of something allocated before tracing began. Both land in `summary.untrackedFrees` today. Telling them apart needs a tombstone set of retired addresses — bounded memory, so it would have to be a ring buffer with an honest "beyond this horizon we cannot tell" caveat. |
-| **`compile_commands.json`-aware source snippets** | Show the leaking line inline in the HTML report. |
 | **CI action** | A published GitHub Action wrapping the JSON gate. |
 
 ---

@@ -5,9 +5,11 @@ add_executable(leakhunter_unit_tests
     unit/main.cpp
     unit/AllocationRegistryTest.cpp
     unit/CommandLineParserTest.cpp
+    unit/DiagnosticsTest.cpp
     unit/GlobTest.cpp
     unit/LeakAnalyzerTest.cpp
     unit/ReportGeneratorTest.cpp
+    unit/SourceSnippetTest.cpp
     unit/SuppressionSetTest.cpp
     unit/TracedPidTest.cpp
     unit/TraceRoundTripTest.cpp)
@@ -182,6 +184,26 @@ if(LEAKHUNTER_BUILD_AGENT AND LEAKHUNTER_BUILD_EXAMPLES)
                    "EXPECT_MISMATCH_FUNCTION=copyPayload"
                    "EXPECT_MIN_THREADS=4"
                    "EXPECT_FUNCTION=indexBatch"
+                   "EXPECT_EXIT=1")
+
+        # The blamed line must come back out of the source file. Reaching this
+        # exercises the whole chain: interception, unwinding, DWARF, file read.
+        leakhunter_add_integration_test(integration_poc_snippets docindex
+            EXPECT "EXPECT_LEAK_COUNT=700"
+                   "EXPECT_SNIPPET_CONTAINS=malloc(kScratchBytes)"
+                   "EXPECT_EXIT=1")
+
+        # ...and the opt-out has to actually stop reading source.
+        leakhunter_add_integration_test(integration_poc_no_snippets docindex
+            EXTRA_ARGS "--no-source-snippets"
+            EXPECT "EXPECT_LEAK_COUNT=700"
+                   "EXPECT_NO_SNIPPETS=1"
+                   "EXPECT_EXIT=1")
+
+        # --no-source implies it too: with no file:line there is nothing to read.
+        leakhunter_add_integration_test(integration_poc_no_source docindex
+            EXTRA_ARGS "--no-source"
+            EXPECT "EXPECT_NO_SNIPPETS=1"
                    "EXPECT_EXIT=1")
 
         # And the worked suppression file must keep doing what its comments claim.

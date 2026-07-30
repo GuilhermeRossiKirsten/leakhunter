@@ -29,6 +29,24 @@ using nlohmann::json;
     if (!frame.file.empty()) {
         node["file"] = frame.file;
         node["line"] = frame.line;
+        if (frame.column > 0) {
+            node["column"] = frame.column;  // llvm-symbolizer only; absent with addr2line
+        }
+    }
+    return node;
+}
+
+/// The blamed line and its context. Absent, not null, when there is no source:
+/// a consumer checking `"snippet" in group` gets a straight answer.
+[[nodiscard]] json snippetToJson(const SourceSnippet& snippet) {
+    json node{
+        {"file", snippet.file},
+        {"firstLine", snippet.firstLine},
+        {"blamedLine", snippet.blamedLine},
+        {"lines", snippet.lines},
+    };
+    if (snippet.column > 0) {
+        node["column"] = snippet.column;
     }
     return node;
 }
@@ -110,6 +128,9 @@ json JsonReportGenerator::toJson(const analysis::LeakReport& report) {
             {"stackTrace", traceToJson(group.representativeTrace)},
             {"leakIndices", group.leakIndices},
         });
+        if (!group.snippet.empty()) {
+            groups.back()["snippet"] = snippetToJson(group.snippet);
+        }
     }
     document["groups"] = std::move(groups);
 
@@ -149,6 +170,9 @@ json JsonReportGenerator::toJson(const analysis::LeakReport& report) {
             // The allocation stack, not the free stack -- see MismatchedFree.
             {"stackTrace", traceToJson(mismatch.trace)},
         });
+        if (!mismatch.snippet.empty()) {
+            mismatches.back()["snippet"] = snippetToJson(mismatch.snippet);
+        }
     }
     document["mismatchedFrees"] = std::move(mismatches);
 

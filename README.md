@@ -100,6 +100,9 @@ every block was released -- through the wrong door
   which is what recovers the names of `static` functions that never reach the dynamic symbol table.
 - **Attribution, not just addresses.** Allocator frames are skipped so the blame lands on *your*
   function, and leaks are grouped by that function.
+- **The leaking line, shown.** Reports include the source line itself with a caret on the exact
+  column, in the terminal and in the HTML. `--diagnostics` emits `file:line:col: warning:` that your
+  editor can jump to and that GitHub Actions annotates onto the pull-request diff.
 - **Signal from noise.** Blocks the C runtime never frees by design (stdio buffers, locale
   tables) are counted separately instead of drowning out real leaks.
 - **Suppressions that stay honest.** `--suppressions leaks.supp` silences known leaks by function,
@@ -155,6 +158,9 @@ The first non-option token ends LeakHunter's own options — `leakhunter ./app -
 | `--min-leak-size <n>` | Omit leaks below `<n>` bytes from the listing |
 | `--include-runtime` | Also list blocks the C runtime never frees |
 | `--no-source` | Skip the `llvm-symbolizer` pass |
+| `--no-source-snippets` | Don't read source files into the reports |
+| `--source-root <dir>` | Where to find sources when the recorded path isn't valid here |
+| `--diagnostics` | Compiler-style findings on stderr, for editors and CI |
 | `--no-mismatch-check` | Don't report blocks released through the wrong entry point |
 | `--suppressions <file>` | Ignore leaks matching rules in `<file>` (repeatable) |
 | `--keep-trace` | Keep the intermediate binary trace |
@@ -208,6 +214,10 @@ stack interning is high on the [roadmap](docs/ROADMAP.md).
 
 These numbers are a worst case: the benchmark does nothing but allocate. A program that does real
 work between allocations sees proportionally far less.
+
+> **Note on the HTML report:** it embeds excerpts of your source code, because that is what makes
+> it useful. Sharing the artifact therefore shares code. `--no-source-snippets` turns that off; see
+> [docs/USAGE.md](docs/USAGE.md#source-snippets).
 
 ## Known limits
 

@@ -11,6 +11,8 @@
 #include "leakhunter/analysis/LeakAnalyzer.hpp"
 #include "leakhunter/analysis/SuppressionSet.hpp"
 #include "leakhunter/core/AgentLocator.hpp"
+#include "leakhunter/report/DiagnosticsWriter.hpp"
+#include "leakhunter/source/SourceSnippetReader.hpp"
 #include "leakhunter/core/Logger.hpp"
 #include "leakhunter/core/ScopedTempFile.hpp"
 #include "leakhunter/ipc/TraceFormat.hpp"
@@ -51,10 +53,15 @@ public:
     }
 
 private:
+    /// How many of the top leak sites get their source line shown. Small on
+    /// purpose: a terminal summary that scrolls is a summary nobody reads.
+    static constexpr std::size_t kSnippetsInSummary = 3;
+
     [[nodiscard]] Result<fs::path> resolveAgent(const cli::Options& options) const;
     [[nodiscard]] Status writeReports(const cli::Options& options,
                                       const analysis::LeakReport& report);
     void printSummary(const analysis::LeakReport& report, const cli::Options& options) const;
+    void printSnippet(const SourceSnippet& snippet) const;
 
     std::unique_ptr<process::IProcessRunner> runner_;
     std::ostream& out_;
@@ -153,8 +160,8 @@ ExitCode Application::Impl::run(const cli::Options& options) {
     //     that the environment reached the child intact.
     const std::uint64_t tracedPid = memoryTracker.traceInfo().pid;
     if (tracedPid != 0 && tracedPid != processResult.value().pid) {
-        err_ << "leakhunter: the trace was written by pid " << tracedPid << " but the target was pid "
-             << processResult.value().pid
+        err_ << "leakhunter: the trace was written by pid " << tracedPid
+             << " but the target was pid " << processResult.value().pid
              << ".\n  This report would describe a different process; refusing to write it.\n";
         return ExitCode::InternalError;
     }
@@ -194,6 +201,34 @@ ExitCode Application::Impl::run(const cli::Options& options) {
     report.targetCommand = joinCommand(options.targetCommand);
     report.mismatchCheck = mismatchCheck;
 
+    // 6b. Read the blamed lines out of the source tree.
+    //
+    //     After analysis, not during: the analyzer decides *which* frame is to
+    //     blame and must stay free of I/O to keep being testable with a fake
+    //     resolver and no files on disk.
+    if (options.sourceSnippets) {
+        source::SnippetConfig snippetConfig;
+        snippetConfig.contextLines = options.snippetContext;
+        snippetConfig.roots = options.sourceRoots;
+
+        source::SourceSnippetReader snippets(snippetConfig);
+        (void)snippets.enrich(report);
+
+        if (!snippets.missingFiles().empty()) {
+            // Worth one line: the usual cause is a report generated somewhere
+            // other than where the target was built, and --source-root fixes it.
+            log::info("{} source file(s) were not found, so those sites have no snippet; "
+                      "pass --source-root <dir> if the tree lives elsewhere here",
+                      snippets.missingFiles().size());
+            for (const std::string& missing : snippets.missingFiles()) {
+                log::debug("  no source at {}", missing);
+            }
+        }
+        if (snippets.budgetExhausted()) {
+            log::warn("the source-snippet size budget was reached; later sites have no snippet");
+        }
+    }
+
     // 7. Render.
     if (Status written = writeReports(options, report); !written) {
         err_ << "leakhunter: " << written.message() << '\n';
@@ -201,6 +236,12 @@ ExitCode Application::Impl::run(const cli::Options& options) {
     }
 
     printSummary(report, options);
+
+    // Compiler-style lines go to stderr, where a build tool expects diagnostics
+    // and where they stay out of a `--json`-piped stdout.
+    if (options.emitDiagnostics) {
+        report::writeDiagnostics(report, err_, report::detectDiagnosticStyle());
+    }
 
     if (options.keepTrace) {
         (void)trace.release();
@@ -247,6 +288,36 @@ Status Application::Impl::writeReports(const cli::Options& options,
         }
     }
     return {};
+}
+
+void Application::Impl::printSnippet(const SourceSnippet& snippet) const {
+    const std::size_t blamed = snippet.blamedIndex();
+    if (snippet.empty() || blamed == static_cast<std::size_t>(-1)) {
+        return;
+    }
+
+    // One line of code and one marker line, in the shape rustc and clang use --
+    // familiar enough that nobody has to work out what they are looking at.
+    const std::string& code = snippet.lines[blamed];
+    const std::string gutter = fmt::format("{:>6}", snippet.blamedLine);
+
+    out_ << fmt::format("                    {} | {}\n", gutter, code);
+
+    // Point at the column when the symbolizer gave one. Columns are 1-based and
+    // count the expanded line, which is why tabs are expanded at read time.
+    std::string marker(gutter.size(), ' ');
+    marker += " | ";
+    if (snippet.column > 0 && snippet.column <= code.size() + 1) {
+        marker.append(snippet.column - 1, ' ');
+        marker += '^';
+    } else {
+        // No column: underline from the first non-blank character, so the marker
+        // still says "this line" without claiming a precision we do not have.
+        const std::size_t indent = code.find_first_not_of(" \t");
+        marker.append(indent == std::string::npos ? 0 : indent, ' ');
+        marker.append(indent == std::string::npos ? 1 : code.size() - indent, '~');
+    }
+    out_ << "                    " << marker << '\n';
 }
 
 void Application::Impl::printSummary(const analysis::LeakReport& report,
@@ -324,6 +395,12 @@ void Application::Impl::printSummary(const analysis::LeakReport& report,
                                 group.count, group.function);
             if (!group.location.empty()) {
                 out_ << fmt::format("                        at {}\n", group.location);
+            }
+
+            // The source line itself, for the first few. This is the difference
+            // between being told where to look and being shown.
+            if (i < kSnippetsInSummary) {
+                printSnippet(group.snippet);
             }
         }
         if (report.groups.size() > shown) {

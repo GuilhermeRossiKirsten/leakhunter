@@ -40,6 +40,7 @@ private:
         std::string function;
         std::string file;
         std::uint32_t line = 0;
+        std::uint32_t column = 0;  ///< llvm-symbolizer reports it; addr2line does not
 
         [[nodiscard]] bool empty() const noexcept { return function.empty() && line == 0; }
     };
