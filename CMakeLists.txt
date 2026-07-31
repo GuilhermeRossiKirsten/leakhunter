@@ -61,6 +61,13 @@ if(LEAKHUNTER_BUILD_POC)
     add_subdirectory(poc3)
     add_subdirectory(poc4)
     add_subdirectory(poc5)
+    # Verification set: every leak below is fixed by constants in the source,
+    # so the report can be checked against arithmetic -- see docs/VALIDATION.md.
+    add_subdirectory(poc6)
+    add_subdirectory(poc7)
+    add_subdirectory(poc8)
+    add_subdirectory(poc9)
+    add_subdirectory(poc10)
 endif()
 
 if(LEAKHUNTER_BUILD_TESTS)

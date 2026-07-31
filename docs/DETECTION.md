@@ -293,5 +293,7 @@ Strategy descriptions and anything not measured above come from:
 - [Memory safety: how Arm MTE addresses this challenge — Arm](https://newsroom.arm.com/blog/memory-safety-arm-memory-tagging-extension)
 - [Profiling and memory checking tools — Qt Wiki](https://wiki.qt.io/Profiling_and_Memory_Checking_Tools)
 
+For a leak-by-leak cross-check against hand-computed arithmetic, see [VALIDATION.md](VALIDATION.md).
+
 Reproduce the measurements with [`scripts/run_all_pocs.sh`](../scripts/run_all_pocs.sh) for the
 LeakHunter side, and `g++ -fsanitize=address` on `poc/src/*.cpp` for the ASan side.

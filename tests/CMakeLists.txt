@@ -293,6 +293,70 @@ if(LEAKHUNTER_BUILD_AGENT AND LEAKHUNTER_BUILD_EXAMPLES)
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/integration/run_naming.cmake")
     set_tests_properties(integration_report_naming PROPERTIES LABELS "integration" TIMEOUT 60)
 
+    # ---------------------------------------------------------------------
+    # The verification set. Every expectation below is arithmetic from named
+    # constants in the POC's own source, cross-checked against ASan/LSan, and
+    # written up in docs/VALIDATION.md. A change to either the tool or the
+    # demonstration that breaks the agreement fails here.
+    # ---------------------------------------------------------------------
+
+    # realloc frees and allocates in one call: 300 allocation calls, 40 live
+    # blocks. Double-counting or losing the block both show up as a wrong total.
+    if(TARGET realloc_chain)
+        leakhunter_add_integration_test(integration_poc6_realloc realloc_chain
+            EXPECT "EXPECT_LEAK_COUNT=85"
+                   "EXPECT_LEAKED_BYTES=64640"
+                   "EXPECT_MISMATCHES=0"
+                   "EXPECT_TIMELINE=1"
+                   "EXPECT_HOTSPOTS=1"
+                   "EXPECT_EXIT=1")
+    endif()
+
+    # aligned_alloc, posix_memalign and the over-aligned operator new. A hook
+    # that is not installed shows up as a smaller number, silently -- which is
+    # why the count is pinned exactly rather than as a minimum.
+    if(TARGET aligned_family)
+        leakhunter_add_integration_test(integration_poc7_aligned aligned_family
+            EXPECT "EXPECT_LEAK_COUNT=75"
+                   "EXPECT_LEAKED_BYTES=23040"
+                   "EXPECT_MIN_GROUPS=4"
+                   "EXPECT_MISMATCHES=0"
+                   "EXPECT_EXIT=1")
+    endif()
+
+    # 90, not 140: the 50 unique_ptr buffers released while unwinding must not
+    # be reported. This is the assertion that RAII is understood.
+    if(TARGET exception_paths)
+        leakhunter_add_integration_test(integration_poc8_exceptions exception_paths
+            EXPECT "EXPECT_LEAK_COUNT=90"
+                   "EXPECT_LEAKED_BYTES=13840"
+                   "EXPECT_MISMATCHES=0"
+                   "EXPECT_EXIT=1")
+    endif()
+
+    # Exactness under concurrency, and thread attribution: one site reached from
+    # all 8 threads, with 1 MiB of churn correctly excluded from the leak total.
+    if(TARGET thread_storm)
+        leakhunter_add_integration_test(integration_poc9_threads thread_storm
+            EXPECT "EXPECT_LEAK_COUNT=1000"
+                   "EXPECT_LEAKED_BYTES=128000"
+                   "EXPECT_MIN_THREADS=8"
+                   "EXPECT_MISMATCHES=0"
+                   "EXPECT_TIMELINE=1"
+                   "EXPECT_HOTSPOTS=1"
+                   "EXPECT_EXIT=1")
+    endif()
+
+    # Blocks, not bytes: a make_shared block carries a control block whose size
+    # belongs to the standard library, so the byte total is platform-dependent
+    # while the block count is not. Pinning bytes here would fail on libc++.
+    if(TARGET ownership_zoo)
+        leakhunter_add_integration_test(integration_poc10_ownership ownership_zoo
+            EXPECT "EXPECT_LEAK_COUNT=170"
+                   "EXPECT_MISMATCHES=0"
+                   "EXPECT_EXIT=1")
+    endif()
+
     # The negative control at demonstration scale: ~12000 allocations through
     # unique_ptr with a custom deleter, a shared_ptr graph with weak_ptr back
     # references, exceptions unwound by RAII, and a pmr arena -- all of it clean.

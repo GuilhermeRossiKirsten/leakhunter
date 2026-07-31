@@ -125,6 +125,9 @@ every block was released -- through the wrong door
 - **Suppressions that stay honest.** `--suppressions leaks.supp` silences known leaks by function,
   module, source path or whole stack — and reports what it silenced, per rule, plus any rule that
   has rotted into matching nothing. Quiet output always means something.
+- **Numbers you can check.** Five demonstrations (`poc6`–`poc10`) whose every leak is fixed by named
+  constants, so the expected result is arithmetic you can do on paper — cross-checked against
+  AddressSanitizer, and pinned in CI. See [VALIDATION.md](docs/VALIDATION.md).
 - **Mismatched frees, grouped.** `new[]` released with `delete`, `malloc` released with `delete`, and
   the rest of that family — collapsed by call site *and* pairing, with a count. A loop gets the same
   address back from the allocator every iteration, so eight turns of one line used to render as eight
