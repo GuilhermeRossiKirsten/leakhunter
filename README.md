@@ -134,7 +134,13 @@ every block was released -- through the wrong door
   identical findings; `distinctAddresses` now says outright whether they are iterations or separate
   sites. Undefined behaviour that usually keeps working right up until it doesn't.
   Free at run time: the allocating entry point is already recorded, so the check is a comparison.
-- **Thread-aware.** Every allocation carries the kernel thread id that made it.
+- **Thread-aware, and it says something about it.** Every allocation carries the kernel thread id
+  that made it — and sites whose blocks are *released by a different thread than allocated them* are
+  reported as a distinct finding, with what to check. That is not a leak and not a race; it is the
+  precondition for the cross-thread use-after-free and double-free bugs that are hardest to
+  reproduce. A race detector reports the race only if it fires on the run it watches; this reports
+  the shape on every run, which is what makes it useful in CI where the schedule is never
+  production's.
 - **Two reports.** A self-contained HTML page (no CDN, no assets directory) and a versioned JSON
   document for tooling.
 
@@ -273,6 +279,9 @@ These are deliberate, and documented rather than hidden:
 - **The memory profile is capped at 2,000,000 events.** Past that it covers only the start of the
   run and is marked `truncated` — which every renderer states outright, because a truncated profile
   goes flat and looks exactly like a leak that stopped.
+- **The agent cannot trace under Valgrind.** Valgrind redirects the allocator beneath `LD_PRELOAD`,
+  so the trace comes back essentially empty (measured: 533,861 bytes → 1,386) with no warning. Run
+  the two tools separately; [VALIDATION.md](docs/VALIDATION.md) shows they agree when you do.
 - **Double frees are not detected.** A second free of an address we have already retired looks
   the same as a free of something allocated before tracing began; both are counted in
   `summary.untrackedFrees`.

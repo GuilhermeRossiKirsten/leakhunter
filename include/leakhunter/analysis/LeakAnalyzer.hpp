@@ -58,6 +58,14 @@ public:
     void rankHotSpots(LeakReport& report, std::vector<AllocationSite> sites,
                       std::size_t keep = 10) const;
 
+    /// Finds the call sites whose blocks cross a thread boundary.
+    ///
+    /// Runs over every tracked site rather than the top ten by volume: a
+    /// handoff is worth knowing about at any size, and the rarest one is often
+    /// the one nobody designed.
+    void findThreadHandoffs(LeakReport& report, const std::vector<AllocationSite>& sites,
+                            std::size_t keep = 10) const;
+
     /// Index of the first frame that is neither the agent nor an allocator
     /// entry point. Exposed for testing; falls back to 0 when every frame
     /// looks like infrastructure.

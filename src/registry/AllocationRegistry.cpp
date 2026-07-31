@@ -81,6 +81,42 @@ void AllocationRegistry::chargeSite(const std::vector<std::uint64_t>& callStack,
     }
 }
 
+void AllocationRegistry::noteThreads(const std::vector<std::uint64_t>& callStack,
+                                     std::uint64_t allocThread, std::uint64_t freeThread,
+                                     bool isRelease) {
+    if (!collectSites_ || callStack.empty()) {
+        return;
+    }
+    const auto existing = sites_.find(hashStack(callStack));
+    if (existing == sites_.end()) {
+        return;  // allocated before tracking began, or past the site cap
+    }
+    AllocationSite& site = existing->second;
+
+    // A tiny linear scan beats a set here: the vector holds at most 16 entries
+    // and is almost always 1, so the hashing would cost more than the search.
+    const auto remember = [](std::vector<std::uint64_t>& seen, std::uint64_t thread) {
+        if (seen.size() >= kMaxThreadsPerSite) {
+            return;
+        }
+        if (std::find(seen.begin(), seen.end(), thread) == seen.end()) {
+            seen.push_back(thread);
+        }
+    };
+
+    remember(site.allocatingThreads, allocThread);
+    if (!isRelease) {
+        return;
+    }
+
+    remember(site.releasingThreads, freeThread);
+    if (freeThread != allocThread) {
+        ++site.crossThreadFrees;
+    } else {
+        ++site.sameThreadFrees;
+    }
+}
+
 std::vector<AllocationSite> AllocationRegistry::takeAllocationSites() {
     std::vector<AllocationSite> result;
     result.reserve(sites_.size());
@@ -133,6 +169,7 @@ void AllocationRegistry::recordAllocation(AllocationInfo&& allocation) {
     // round would count both blocks as live at once when they share a site,
     // overstating that site's peak by one allocation.
     chargeSite(allocation.callStack, static_cast<std::int64_t>(size));
+    noteThreads(allocation.callStack, allocation.threadId, 0, /*isRelease=*/false);
 
     if (existing != live_.end()) {
         existing->second = std::move(allocation);
@@ -189,6 +226,9 @@ bool AllocationRegistry::recordDeallocation(std::uint64_t address, std::uint64_t
     stats_.totalBytesFreed += allocation.size;
     noteTimeline(timestampNs, -static_cast<std::int64_t>(allocation.size));
     chargeSite(allocation.callStack, -static_cast<std::int64_t>(allocation.size));
+    // The block's own allocating thread, not the site's -- one site can serve
+    // several producers, and only the per-block comparison is meaningful.
+    noteThreads(allocation.callStack, allocation.threadId, threadId, /*isRelease=*/true);
     liveBytes_ -= std::min(liveBytes_, allocation.size);
     live_.erase(it);
     return true;

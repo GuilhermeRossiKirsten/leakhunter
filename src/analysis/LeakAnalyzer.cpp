@@ -407,6 +407,85 @@ void LeakAnalyzer::buildMismatchGroups(LeakReport& report) {
     report.mismatchGroupsArePartial = report.suppressedMismatches > 0;
 }
 
+void LeakAnalyzer::findThreadHandoffs(LeakReport& report,
+                                      const std::vector<AllocationSite>& sites,
+                                      std::size_t keep) const {
+    for (const AllocationSite& site : sites) {
+        if (site.crossThreadFrees == 0) {
+            continue;  // stayed on one thread; nothing to say
+        }
+
+        ThreadHandoff handoff;
+        handoff.crossThreadFrees = site.crossThreadFrees;
+        handoff.sameThreadFrees = site.sameThreadFrees;
+        handoff.allocatingThreadCount = site.allocatingThreads.size();
+        handoff.releasingThreadCount = site.releasingThreads.size();
+
+        handoff.representativeTrace = resolver_.resolveAll(site.callStack);
+        handoff.blamedFrame = findResponsibleFrame(handoff.representativeTrace);
+
+        const StackFrame* frame = handoff.blamedFrame < handoff.representativeTrace.size()
+                                      ? &handoff.representativeTrace[handoff.blamedFrame]
+                                      : nullptr;
+        if (frame != nullptr) {
+            handoff.function = frame->displayName();
+            handoff.module = frame->module;
+            if (frame->preciseName()) {
+                handoff.location = fmt::format("{}:{}", frame->file, frame->line);
+            } else if (!frame->module.empty()) {
+                handoff.location =
+                    fmt::format("{}+0x{:x}", frame->module, frame->moduleOffset());
+            }
+        } else {
+            handoff.function = "<unknown>";
+        }
+
+        // The advice is the deliverable. A count on its own tells a reader that
+        // something happened, not whether to care or what to look at.
+        if (handoff.alwaysCrosses()) {
+            handoff.advice.emplace_back(fmt::format(
+                "Every one of these {} blocks was released by a different thread than allocated "
+                "it. That is the shape of a deliberate handoff -- a queue, a pool, a future.",
+                handoff.crossThreadFrees));
+            handoff.advice.emplace_back(
+                "Check that the handoff itself synchronises: the consumer must not be able to see "
+                "the block before the producer has finished writing it, and the producer must not "
+                "touch it afterwards. A mutex or a release/acquire pair on the queue gives you "
+                "both; a raw pointer passed through a plain variable gives you neither.");
+        } else {
+            handoff.advice.emplace_back(fmt::format(
+                "{} of {} blocks from this site were released by another thread, and the rest were "
+                "not. A site that only sometimes hands memory over is more often an accident than "
+                "a design -- worth confirming which one it is here.",
+                handoff.crossThreadFrees, handoff.crossThreadFrees + handoff.sameThreadFrees));
+        }
+
+        if (handoff.releasingThreadCount > 1) {
+            handoff.advice.emplace_back(fmt::format(
+                "{} different threads released blocks from this site. If two of them can ever hold "
+                "the same pointer, the double free is a scheduling accident away.",
+                handoff.releasingThreadCount));
+        }
+
+        handoff.advice.emplace_back(
+            "std::unique_ptr moved into the queue makes the transfer explicit and the "
+            "double free impossible: after the move the producer has nothing left to free.");
+
+        report.threadHandoffs.push_back(std::move(handoff));
+    }
+
+    std::sort(report.threadHandoffs.begin(), report.threadHandoffs.end(),
+              [](const ThreadHandoff& lhs, const ThreadHandoff& rhs) {
+                  if (lhs.crossThreadFrees != rhs.crossThreadFrees) {
+                      return lhs.crossThreadFrees > rhs.crossThreadFrees;
+                  }
+                  return lhs.function < rhs.function;  // deterministic across runs
+              });
+    if (report.threadHandoffs.size() > keep) {
+        report.threadHandoffs.resize(keep);
+    }
+}
+
 void LeakAnalyzer::rankHotSpots(LeakReport& report, std::vector<AllocationSite> sites,
                                 std::size_t keep) const {
     if (sites.empty() || keep == 0) {

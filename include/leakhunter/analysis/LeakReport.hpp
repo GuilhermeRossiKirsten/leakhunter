@@ -127,6 +127,46 @@ struct MismatchGroup {
     }
 };
 
+/// A call site whose memory crosses a thread boundary.
+///
+/// Not a defect by itself: producer/consumer queues, thread pools and work
+/// stealing all hand blocks between threads on purpose. It is reported because
+/// it is the **precondition** for the concurrency bugs that are hardest to
+/// find -- a use-after-free or a double free across threads needs the block to
+/// cross first -- and because it is invisible to everything else in a leak
+/// report.
+///
+/// Where this differs from a race detector: Helgrind and ThreadSanitizer report
+/// a race only if it actually fires during the run they watch. This reports the
+/// *shape* on every run, including the runs where the timing happened to work
+/// out. That makes it useful in CI, where the schedule is never the production
+/// schedule.
+struct ThreadHandoff {
+    std::string function;
+    std::string module;
+    std::string location;
+    StackTrace representativeTrace;
+    std::size_t blamedFrame = 0;
+
+    /// Blocks released by a thread other than the one that allocated them.
+    std::uint64_t crossThreadFrees = 0;
+    /// ...and blocks that stayed on one thread, for proportion.
+    std::uint64_t sameThreadFrees = 0;
+
+    std::uint64_t allocatingThreadCount = 0;
+    std::uint64_t releasingThreadCount = 0;
+
+    /// What this pattern means and what to check. Written for someone who has
+    /// to decide whether to act, not for someone who already knows.
+    std::vector<std::string> advice;
+
+    /// Every release crossed a thread boundary, which is what a deliberate
+    /// handoff looks like. A mixture is more often accidental.
+    [[nodiscard]] bool alwaysCrosses() const noexcept {
+        return crossThreadFrees > 0 && sameThreadFrees == 0;
+    }
+};
+
 /// A call site ranked by how much memory passed through it, leaked or not.
 ///
 /// Deliberately not a leak. A function that allocates 4 GiB across a run and
@@ -185,6 +225,11 @@ struct LeakReport {
 
     /// Where the memory went, leaked or not. Sorted by totalBytes, descending.
     std::vector<HotSpot> hotSpots;
+
+    /// Sites whose blocks cross a thread boundary. Sorted by crossThreadFrees,
+    /// descending. Built from every tracked site, not just the hot ones -- a
+    /// handoff matters at any volume.
+    std::vector<ThreadHandoff> threadHandoffs;
 
     /// True when more distinct call sites existed than could be tracked, so
     /// the ranking is biased towards sites that appeared early in the run.

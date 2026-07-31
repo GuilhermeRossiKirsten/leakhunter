@@ -177,6 +177,21 @@ struct AllocationSite {
     std::uint64_t liveCount = 0;
     std::uint64_t peakLiveBytes = 0;  ///< most this one site ever held at once
     std::vector<std::uint64_t> callStack;
+
+    /// Blocks from this site released by a thread other than the one that
+    /// allocated them.
+    ///
+    /// Not a bug by itself -- producer/consumer queues do this by design -- but
+    /// it is the precondition for the concurrency bugs that matter: a
+    /// use-after-free or a double free across a thread boundary needs the block
+    /// to cross that boundary first. A race detector reports the race only if
+    /// it fires on the run being watched; this reports the shape every time.
+    std::uint64_t crossThreadFrees = 0;
+    std::uint64_t sameThreadFrees = 0;
+
+    /// Distinct threads seen allocating and releasing here, capped.
+    std::vector<std::uint64_t> allocatingThreads;
+    std::vector<std::uint64_t> releasingThreads;
 };
 
 /// One change in how much memory the target was holding.

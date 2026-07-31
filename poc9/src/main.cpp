@@ -14,8 +14,11 @@
 /// are a multiplication rather than an observation. See docs/VALIDATION.md.
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdio>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <thread>
 #include <vector>
 
@@ -37,6 +40,12 @@ constexpr std::size_t kLeakBytes = 128;
 
 constexpr int kChurnPerThread = 500;
 constexpr std::size_t kChurnBytes = 256;
+
+// A producer/consumer handoff: one thread allocates, another releases. Nothing
+// leaks -- every block is freed -- so a leak report says nothing about it at
+// all, which is exactly why the concurrency view exists.
+constexpr int kHandoffBlocks = 300;
+constexpr std::size_t kHandoffBytes = 64;
 
 /// Where the pointer itself escapes to, so the allocation cannot be elided.
 ///
@@ -91,6 +100,52 @@ void worker() {
     }
 }
 
+/// Allocated on the producer, released on the consumer. Correct, deliberate,
+/// and invisible to a leak detector -- nothing leaks here. The report should
+/// describe the shape without calling it a defect.
+void producerConsumer() {
+    std::queue<char*> queue;
+    std::mutex mutex;
+    std::condition_variable ready;
+    bool done = false;
+
+    std::thread producer([&] {
+        for (int i = 0; i < kHandoffBlocks; ++i) {
+            char* block = new char[kHandoffBytes];
+            touch(block, kHandoffBytes);
+            {
+                std::lock_guard<std::mutex> guard(mutex);
+                queue.push(block);
+            }
+            ready.notify_one();
+        }
+        {
+            std::lock_guard<std::mutex> guard(mutex);
+            done = true;
+        }
+        ready.notify_all();
+    });
+
+    std::thread consumer([&] {
+        int taken = 0;
+        while (taken < kHandoffBlocks) {
+            std::unique_lock<std::mutex> lock(mutex);
+            ready.wait(lock, [&] { return !queue.empty() || done; });
+            while (!queue.empty()) {
+                char* block = queue.front();
+                queue.pop();
+                lock.unlock();
+                delete[] block;  // released on a different thread than allocated
+                ++taken;
+                lock.lock();
+            }
+        }
+    });
+
+    producer.join();
+    consumer.join();
+}
+
 }  // namespace
 
 int main() {
@@ -104,6 +159,8 @@ int main() {
     for (std::thread& thread : workers) {
         thread.join();
     }
+
+    producerConsumer();
 
     constexpr std::size_t expectedBytes =
         static_cast<std::size_t>(kThreads) * kLeaksPerThread * kLeakBytes;

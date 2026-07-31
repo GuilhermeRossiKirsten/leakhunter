@@ -135,3 +135,20 @@ Saying no is what keeps the tool small:
   dial; sampling is the future answer.
 - **Replacing the allocator.** LeakHunter observes; it never changes allocation behaviour, so the
   program under test behaves the way it does in production.
+
+## The agent's locking is not verified by a race detector
+
+The host side is single-threaded by construction. The **agent** is not: it runs on every thread of
+the target and appends records under a lock.
+
+Helgrind and DRD cannot check it. Valgrind redirects the allocator beneath `LD_PRELOAD`, so under
+either tool the agent barely executes — 533,861 bytes of trace become 1,386 — and a clean report from
+them means nothing. See [DETECTION.md](DETECTION.md) §4b.
+
+What would actually verify it: a ThreadSanitizer build of the agent (`-fsanitize=thread`), preloaded
+into a multithreaded target. TSan instruments at compile time rather than redirecting the allocator,
+so it should not have Valgrind's problem. Untried so far.
+
+Evidence it is *probably* fine, which is not the same as verified: `poc9/thread_storm` reports
+exactly 1,000 blocks and 128,000 bytes across 8 threads, run after run, and any lost or torn record
+would show as a count that drifts.

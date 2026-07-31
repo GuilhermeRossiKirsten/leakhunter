@@ -99,6 +99,18 @@ private:
     /// when @p size is negative.
     void chargeSite(const std::vector<std::uint64_t>& callStack, std::int64_t size);
 
+    /// Records which thread allocated a block and which one released it.
+    ///
+    /// Separate from chargeSite() because it is called on a different event and
+    /// needs both thread ids, and because the volume accounting must stay
+    /// readable on its own.
+    void noteThreads(const std::vector<std::uint64_t>& callStack, std::uint64_t allocThread,
+                     std::uint64_t freeThread, bool isRelease);
+
+    /// Distinct thread ids kept per site. A site reached from more threads than
+    /// this is already unambiguously "many"; the count stays exact.
+    static constexpr std::size_t kMaxThreadsPerSite = 16;
+
     std::unordered_map<std::uint64_t, AllocationInfo> live_;
     std::vector<MismatchedFree> mismatches_;
     SessionStats stats_;

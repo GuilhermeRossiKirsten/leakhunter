@@ -188,6 +188,112 @@ The 25 `weak_ptr` cycles are byte-for-byte identical apart from one word and lea
 
 ---
 
+## Valgrind
+
+Valgrind Memcheck now runs here — `libc6-dbg` matching this glibc build was installed, which is what
+the earlier editions of this document said was missing. It is a **fourth** implementation and the most
+different of all: dynamic binary translation, no recompilation, no `LD_PRELOAD`.
+
+Memcheck splits its findings four ways. LeakHunter has one category, so the comparison is
+`definitely + indirectly` against LeakHunter's total:
+
+| Target | Expected | LeakHunter | VG definite | VG indirect | VG total | |
+|---|---|---|---|---|---|---|
+| `realloc_chain` | 85 / 64,640 | 85 / 64,640 | 85 / 64,640 | — | **85 / 64,640** | ✅ |
+| `aligned_family` | 75 / 23,040 | 75 / 23,040 | 75 / 23,040 | — | **75 / 23,040** | ✅ |
+| `exception_paths` | 90 / 13,840 | 90 / 13,840 | 90 / 13,840 | — | **90 / 13,840** | ✅ |
+| `thread_storm` | 1,000 / 128,000 | 1,000 / 128,000 | 1,000 / 128,000 | — | **1,000 / 128,000** | ✅ |
+| `ownership_zoo` | 170 blocks | 170 / 33,360 | 75 / 17,000 | 95 / 16,360 | **170 / 33,360** | ✅ |
+| `clean_app` | nothing | nothing | — | — | **nothing** | ✅ |
+| `docindex` | — | 700 / 319,450 | 500 / 217,050 | 200 / 102,400 | **700 / 319,450** | ✅ |
+
+**Every total matches, and the splits add up exactly.** `ownership_zoo`: 75 + 95 = 170 blocks,
+17,000 + 16,360 = 33,360 bytes. `docindex`: 500 + 200 = 700, 217,050 + 102,400 = 319,450.
+
+Where Memcheck says *indirectly lost* it is describing structure LeakHunter cannot express — the 95
+blocks in `ownership_zoo` are the cycle payloads and handle buffers, unreachable *because* the thing
+owning them leaked. Same memory, same totals, more explanation. `still reachable` is **0** everywhere,
+including `clean_app`.
+
+### Mismatched frees
+
+```
+LeakHunter:   8 mismatched frees, grouped into 1 site
+Valgrind:     ERROR SUMMARY: 8 errors from 1 contexts
+```
+
+Two independent tools, the same 8 occurrences collapsed to the same 1 context — arrived at
+separately. That is a useful confirmation of the grouping added for exactly this case.
+
+### Valgrind settles the one disagreement
+
+Clang's LSan reported 9 of the ten `new char[128]` blocks in `aligned_family`; the arithmetic,
+LeakHunter and GCC's LSan all said 10. Memcheck:
+
+```
+1,280 bytes in 10 blocks are definitely lost in loss record 1 of 4
+still reachable: 0 bytes in 0 blocks
+```
+
+**10, definitely lost.** So the count stands at arithmetic + LeakHunter + GCC LSan + Valgrind = 10,
+against Clang LSan = 9. The cause is understood — the `g_escape` global in the test harness, which
+only LLVM's root scanner treats as keeping that block alive — and the conclusion is that **75 is the
+correct answer**, which is what LeakHunter reports.
+
+## Three run-time implementations, and the one disagreement
+
+The comparison above uses GCC's `libasan`. Adding **LLVM's `compiler-rt`** — a separate codebase, not
+a rebuild of the same one — makes it three independent implementations:
+
+| Target | Expected | LeakHunter | GCC LSan | Clang LSan |
+|---|---|---|---|---|
+| `realloc_chain` | 85 | 85 | 85 | 85 |
+| `aligned_family` | 75 | 75 | 75 | **74** |
+| `exception_paths` | 90 | 90 | 90 | 90 |
+| `thread_storm` | 1,000 | 1,000 | 1,000 | 1,000 |
+| `ownership_zoo` | 170 | 170 | 170 | 170 |
+
+**One disagreement, and it turned out to be the most instructive result here.**
+
+Clang's LSan reported `1152 byte(s) in 9 object(s)` where the arithmetic says ten 128-byte blocks.
+Chasing it:
+
+1. **Was it a different binary?** LeakHunter was run on a GCC build *and* a Clang build of the same
+   source. Both: **75 blocks, 23,040 bytes, identical breakdown.** So the binary was not the cause.
+2. **Was the block still reachable from a register or the stack?** `LSAN_OPTIONS=use_registers=0:use_stacks=0`
+   — still 74. Hypothesis wrong.
+3. **Globals.** `LSAN_OPTIONS=use_globals=0` → `1280 byte(s) in 10 object(s)`. There it is.
+
+The cause is **my own test harness**. `g_escape` — the `volatile void*` added to stop the compiler
+eliding allocations — is a global, and it holds the pointer from the *last* `new char[128]`. LSan's
+flood fill reaches that block from a global root and declines to call it a leak. LeakHunter has no
+reachability analysis, so it counts it.
+
+**Neither tool is wrong, and that is the point.** LSan says *"something still points at this; it may
+be a deliberately retained singleton."* LeakHunter says *"this was allocated and never freed."* For
+the question this document asks — how many blocks did the program fail to free — **75 is the correct
+answer**, and it is the one the constants specify.
+
+This is the reachability difference from [DETECTION.md](DETECTION.md) §2, which that document
+describes in the abstract, caught happening by accident in a five-line harness. It is also a warning
+about writing these harnesses: an anti-elision global changes what a reachability-based tool reports.
+
+## What `-fanalyzer` found: nothing, for a documented reason
+
+GCC's static analyser found **0 leaks in all five**. That is not a failure of the POCs — a control
+confirms the analyser works:
+
+```c
+int f(void){ char* p = malloc(64); if(!p) return 1; return 0; }
+   warning: leak of 'p' [CWE-401] [-Wanalyzer-malloc-leak]
+```
+
+`-fanalyzer` is a **C** analyser; GCC documents its C++ support as very limited, and every leak here
+is through `new`, `make_shared` or across function boundaries. Worth knowing before anyone puts it in
+a C++ CI pipeline expecting leak coverage. On C code it is genuinely useful and costs nothing to run.
+
+---
+
 ## Why the site counts differ from LSan's
 
 Blocks and bytes agree in all five. **Grouping does not always**, and the reason is worth stating
@@ -226,6 +332,8 @@ objects, LSan's grouping is more informative; if you want the function to open, 
 | `thread_storm` | 1,000 / 128,000 B | 1,000 / 128,000 B | 1,000 / 128,000 B | ✅ |
 | `ownership_zoo` | 170 blocks | 170 / 33,360 B | 170 / 33,360 B | ✅ |
 | `clean_app` (poc5) | **nothing** | nothing | nothing | ✅ |
+
+Valgrind Memcheck agrees with every row above; see the Valgrind section for its four-way split.
 
 **1,420 blocks and 262,880 bytes across five programs, three independent methods, no disagreement.**
 
@@ -271,8 +379,21 @@ Being clear about the limits is what makes the rest worth reading.
 - **It does not cover memory errors**, only leaks. LeakHunter is structurally blind to
   buffer overflows and use-after-free; ASan found a real heap-buffer-overflow in this repository's
   own `poc/` that LeakHunter cannot see, written up in [DETECTION.md](DETECTION.md) §4.
-- **Valgrind is not among the tools above.** It cannot run in this environment (Ubuntu ships a
-  stripped `ld.so` and the matching `libc6-dbg` for glibc 2.39 is no longer in the pool). No
-  estimated numbers were substituted — see [DETECTION.md](DETECTION.md) §3.
+- **Valgrind now runs**, after `libc6-dbg` matching this glibc was installed with root. Its results
+  are in the Valgrind section above and agree with every row. Getting there without root was not
+  possible, and the routes that failed are recorded because they are what most CI images will hit:
+
+  | Attempt | Result |
+  |---|---|
+  | `apt-get download libc6-dbg` | 404 — 2.39-0ubuntu8.7 superseded, index stale |
+  | archive + security pool listing | only `8.8` and `8` remain |
+  | `libc6-dbg 8.8` against our `ld.so` | build ID `da07864e…` absent — point releases differ |
+  | `debuginfod.ubuntu.com` (by build ID) | connection times out; host unreachable here |
+  | `sudo apt-get install` | no passwordless sudo |
+  | Launchpad API → librarian | API answers, but `launchpadlibrarian.net` is unreachable |
+
+  Without matching symbols Valgrind stops at `a must-be-redirected function whose name matches the
+  pattern: strlen in an object with soname matching: ld-linux-x86-64.so.2`. `sudo apt-get install
+  valgrind libc6-dbg` fixes it in one step; nothing short of root did.
 - **`ownership_zoo`'s byte total is platform-dependent.** The 33,360 figure holds for libstdc++ on
   x86-64. Its **block count of 170 is portable**; the integration test pins blocks, not bytes.

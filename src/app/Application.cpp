@@ -129,6 +129,7 @@ private:
     void printTriage(const analysis::LeakTriage& triage) const;
     void printMemoryProfile(const analysis::LeakReport& report) const;
     void printHotSpots(const analysis::LeakReport& report) const;
+    void printThreadHandoffs(const analysis::LeakReport& report) const;
 
     std::unique_ptr<process::IProcessRunner> runner_;
     std::ostream& out_;
@@ -286,7 +287,12 @@ ExitCode Application::Impl::run(const cli::Options& options) {
     // that were freed, so letting them anywhere near the leak verdict would be
     // a category error.
     report.hotSpotsTruncated = allocations.siteTrackingTruncated();
-    analyzer.rankHotSpots(report, allocations.takeAllocationSites());
+
+    // Taken once: takeAllocationSites() moves the data out of the registry, so
+    // both passes have to read the same vector rather than calling it twice.
+    std::vector<AllocationSite> sites = allocations.takeAllocationSites();
+    analyzer.findThreadHandoffs(report, sites);
+    analyzer.rankHotSpots(report, std::move(sites));
 
     // Now, not inside analyze(): triage needs the run's duration, and for a
     // target we stopped there is no end record, so the only source is the wall
@@ -500,6 +506,47 @@ void Application::Impl::printMemoryProfile(const analysis::LeakReport& report) c
     out_ << "\n";
 }
 
+/// Call sites whose memory crosses a thread boundary.
+///
+/// Placed before the leak list on purpose. A leak costs memory; a mishandled
+/// handoff costs a crash in production on a schedule that never occurs in CI,
+/// and it is the finding a reader is least likely to have already known about.
+void Application::Impl::printThreadHandoffs(const analysis::LeakReport& report) const {
+    if (report.threadHandoffs.empty()) {
+        return;
+    }
+
+    out_ << "  memory crossing threads  (not a leak -- a pattern to verify)\n";
+
+    const std::size_t shown = std::min<std::size_t>(report.threadHandoffs.size(), 2);
+    for (std::size_t i = 0; i < shown; ++i) {
+        const analysis::ThreadHandoff& handoff = report.threadHandoffs[i];
+
+        out_ << fmt::format("    x{:<6} {}\n", handoff.crossThreadFrees,
+                            handoff.function);
+        if (!handoff.location.empty()) {
+            out_ << fmt::format("                        at {}\n", handoff.location);
+        }
+        out_ << fmt::format(
+            "                        allocated on {} thread(s), released on {}{}\n",
+            handoff.allocatingThreadCount, handoff.releasingThreadCount,
+            handoff.alwaysCrosses() ? " -- always a handoff" : " -- only sometimes");
+
+        // One line of advice here; the rest is in the reports. A terminal
+        // summary that scrolls is one nobody reads to the end of.
+        if (!handoff.advice.empty()) {
+            for (const std::string& line : wrapText(handoff.advice.front(), 56)) {
+                out_ << "                        " << line << "\n";
+            }
+        }
+    }
+    if (report.threadHandoffs.size() > shown) {
+        out_ << fmt::format("    ... and {} more site(s) (see the report)\n",
+                            report.threadHandoffs.size() - shown);
+    }
+    out_ << "\n";
+}
+
 /// Where the memory went, whether or not it came back.
 ///
 /// Distinct from the leak list on purpose, and labelled so nobody reads it as
@@ -650,6 +697,7 @@ void Application::Impl::printSummary(const analysis::LeakReport& report,
     out_ << "\n";
 
     printMemoryProfile(report);
+    printThreadHandoffs(report);
     printHotSpots(report);
 
     if (!report.mismatchGroups.empty()) {

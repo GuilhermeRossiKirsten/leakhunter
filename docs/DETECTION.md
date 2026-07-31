@@ -113,9 +113,19 @@ Ubuntu ships a stripped `ld.so`, so Valgrind needs `libc6-dbg` matching the exac
 system runs glibc 2.39; the Ubuntu pool now carries debug symbols only for 2.41 and later, and debug
 symbols must match by build ID. Without root there is no way to install the right one.
 
+Six routes to the matching symbols were tried and are tabulated in
+[VALIDATION.md](VALIDATION.md) — the package is superseded in the pool, the successor's build IDs do
+not match, `debuginfod.ubuntu.com` and `launchpadlibrarian.net` are unreachable from this network, and
+there is no root.
+
 **So there are no Valgrind numbers in this document.** Everything above about Valgrind comes from its
 documentation and is labelled as such. Publishing estimates next to measurements would make the
 measurements worthless.
+
+**LLVM's `compiler-rt` was obtained instead**, which supplies what Valgrind was wanted for: a third
+implementation, independent of both this project and GCC's `libasan`. The three-way comparison — and
+the single disagreement it produced, which turned out to be a textbook demonstration of §2's
+reachability difference — is in [VALIDATION.md](VALIDATION.md).
 
 ---
 
@@ -145,6 +155,32 @@ patched, because "here is a real bug my own tool is blind to" is worth more than
 table.
 
 ---
+
+## 4b. LeakHunter and Valgrind cannot be combined
+
+Worth stating plainly, because the idea is natural and the failure is quiet.
+
+Running a target under Valgrind **with the agent preloaded** does not work. Measured on
+`poc9/thread_storm`, 8 threads:
+
+| | Trace produced |
+|---|---|
+| agent alone | **533,861 bytes** |
+| agent under Helgrind | 1,386 bytes |
+| agent under DRD | 1,376 bytes |
+
+Valgrind redirects the allocator at a level beneath `LD_PRELOAD`, so almost nothing reaches our
+interposed functions and the trace is empty in all but name. Nothing warns you: the run completes,
+a trace file exists, and the report is simply missing most of the program.
+
+**This invalidated a result I had already written down.** Helgrind and DRD both reported *0 data
+races* with the agent injected, and that reads like a clean bill of health for the agent's
+thread-safety. It is not — both tools were watching an agent that barely executed. The agent's
+locking under concurrency remains **unverified by a race detector**, and is listed as such in
+[ROADMAP.md](ROADMAP.md) rather than claimed.
+
+Use the two tools separately, on the same binary. That is what [VALIDATION.md](VALIDATION.md) does,
+and it is where the agreement between them is established.
 
 ## 5. When not to use LeakHunter
 
