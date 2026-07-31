@@ -12,6 +12,7 @@
 
 #include <fmt/format.h>
 
+#include "leakhunter/analysis/Baseline.hpp"
 #include "leakhunter/analysis/LeakAnalyzer.hpp"
 #include "leakhunter/analysis/LeakTriage.hpp"
 #include "leakhunter/analysis/MemoryTimeline.hpp"
@@ -130,6 +131,7 @@ private:
     void printMemoryProfile(const analysis::LeakReport& report) const;
     void printHotSpots(const analysis::LeakReport& report) const;
     void printThreadHandoffs(const analysis::LeakReport& report) const;
+    void printBaseline(const analysis::LeakReport& report) const;
 
     std::unique_ptr<process::IProcessRunner> runner_;
     std::ostream& out_;
@@ -291,6 +293,22 @@ ExitCode Application::Impl::run(const cli::Options& options) {
     // Taken once: takeAllocationSites() moves the data out of the registry, so
     // both passes have to read the same vector rather than calling it twice.
     std::vector<AllocationSite> sites = allocations.takeAllocationSites();
+    // Before the reports are written, so the diff is in the JSON too.
+    if (!options.baselineFile.empty()) {
+        auto diff = analysis::compareToBaseline(report, options.baselineFile.string(),
+                                                options.tolerancePercent);
+        if (!diff) {
+            // A mistyped path would turn every pre-existing leak into a new one
+            // and fail the build for the wrong reason. Refuse instead.
+            err_ << "leakhunter: " << diff.message() << '\n';
+            return ExitCode::UsageError;
+        }
+        report.baseline = std::move(diff.value());
+    } else if (options.gate == cli::Options::Gate::New) {
+        err_ << "leakhunter: --fail-on new needs --baseline <report.json> to compare against\n";
+        return ExitCode::UsageError;
+    }
+
     analyzer.findThreadHandoffs(report, sites);
     analyzer.rankHotSpots(report, std::move(sites));
 
@@ -367,6 +385,11 @@ ExitCode Application::Impl::run(const cli::Options& options) {
         return ExitCode::UsageError;
     }
 
+    // With a baseline and --fail-on new, the gate is the delta rather than the
+    // absolute count: hold the line where it is, fail on what got worse.
+    if (options.gate == cli::Options::Gate::New && report_->baseline.loaded) {
+        return report_->baseline.regressed() ? ExitCode::LeaksFound : ExitCode::Success;
+    }
     return report_->clean() ? ExitCode::Success : ExitCode::LeaksFound;
 }
 
@@ -502,6 +525,61 @@ void Application::Impl::printMemoryProfile(const analysis::LeakReport& report) c
     // wrapAt keeps the sentence inside a terminal without hyphenating it.
     for (const std::string& line : wrapText(timeline.summary(), 68)) {
         out_ << "    " << line << "\n";
+    }
+    out_ << "\n";
+}
+
+/// What changed since the baseline. Printed first, because with a baseline in
+/// play it is the only part of the report that decides the build.
+void Application::Impl::printBaseline(const analysis::LeakReport& report) const {
+    const analysis::BaselineDiff& diff = report.baseline;
+    if (!diff.loaded) {
+        return;
+    }
+
+    out_ << "  compared to baseline"
+         << (diff.baselineGeneratedAt.empty()
+                 ? std::string{}
+                 : fmt::format("  ({})", diff.baselineGeneratedAt))
+         << "\n";
+
+    const auto list = [this](const char* label, const std::vector<analysis::SiteDelta>& sites) {
+        if (sites.empty()) {
+            return;
+        }
+        out_ << fmt::format("    {:<10} {}\n", label, sites.size());
+        for (std::size_t i = 0; i < std::min<std::size_t>(sites.size(), 3); ++i) {
+            const analysis::SiteDelta& site = sites[i];
+            out_ << fmt::format("      {} ({} -> {} block(s))\n", site.function,
+                                site.baselineCount, site.currentCount);
+        }
+        if (sites.size() > 3) {
+            out_ << fmt::format("      ... and {} more\n", sites.size() - 3);
+        }
+    };
+
+    if (diff.tolerancePercent > 0.0) {
+        out_ << fmt::format("    tolerance  {:.1f}% growth allowed at known sites\n",
+                            diff.tolerancePercent);
+    }
+    list("new", diff.newSites);
+    list("worse", diff.worseSites);
+    list("allowed", diff.withinTolerance);
+    list("fixed", diff.fixedSites);
+    out_ << fmt::format("    {:<10} {}\n", "unchanged", diff.unchangedSites);
+
+    if (diff.currentMismatches != diff.baselineMismatches) {
+        out_ << fmt::format("    {:<10} {} -> {}\n", "mismatches", diff.baselineMismatches,
+                            diff.currentMismatches);
+    }
+
+    // The verdict, in the words the build needs.
+    if (diff.regressed()) {
+        out_ << "    verdict    REGRESSED -- this run introduced findings the baseline did not have\n";
+    } else if (diff.improved()) {
+        out_ << "    verdict    IMPROVED -- nothing new, and some of the baseline is gone\n";
+    } else {
+        out_ << "    verdict    HELD -- nothing new since the baseline\n";
     }
     out_ << "\n";
 }
@@ -696,6 +774,7 @@ void Application::Impl::printSummary(const analysis::LeakReport& report,
     }
     out_ << "\n";
 
+    printBaseline(report);
     printMemoryProfile(report);
     printThreadHandoffs(report);
     printHotSpots(report);

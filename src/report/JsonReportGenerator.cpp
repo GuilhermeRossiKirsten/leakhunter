@@ -119,6 +119,46 @@ json JsonReportGenerator::toJson(const analysis::LeakReport& report) {
         {"clean", report.clean()},
     };
 
+    // The delta a CI dashboard gates on. Present only when --baseline was
+    // given, so its absence is unambiguous rather than an empty diff.
+    if (report.baseline.loaded) {
+        const analysis::BaselineDiff& diff = report.baseline;
+
+        const auto sites = [](const std::vector<analysis::SiteDelta>& deltas) {
+            json array = json::array();
+            for (const analysis::SiteDelta& delta : deltas) {
+                array.push_back({
+                    {"function", delta.function},
+                    {"location", delta.location},
+                    {"baselineBytes", delta.baselineBytes},
+                    {"baselineCount", delta.baselineCount},
+                    {"currentBytes", delta.currentBytes},
+                    {"currentCount", delta.currentCount},
+                    {"byteDelta", delta.byteDelta()},
+                });
+            }
+            return array;
+        };
+
+        document["baseline"] = {
+            {"path", diff.baselinePath},
+            {"generatedAt", diff.baselineGeneratedAt},
+            {"tolerancePercent", diff.tolerancePercent},
+            // The verdict, so a consumer does not have to re-derive the policy.
+            {"regressed", diff.regressed()},
+            {"improved", diff.improved()},
+            {"newSites", sites(diff.newSites)},
+            {"worseSites", sites(diff.worseSites)},
+            {"fixedSites", sites(diff.fixedSites)},
+            // Growth that was allowed through. Listed so the threshold is
+            // auditable rather than silent.
+            {"withinTolerance", sites(diff.withinTolerance)},
+            {"unchangedSites", diff.unchangedSites},
+            {"baselineMismatches", diff.baselineMismatches},
+            {"currentMismatches", diff.currentMismatches},
+        };
+    }
+
     if (!report.hotSpots.empty()) {
         nlohmann::json spots = nlohmann::json::array();
         for (const analysis::HotSpot& spot : report.hotSpots) {

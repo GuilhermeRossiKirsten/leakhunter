@@ -222,6 +222,33 @@ Result<Options> CommandLineParser::parse(std::span<const std::string_view> args)
             options.strictSuppressions = true;
         } else if (token == "--include-runtime") {
             options.includeRuntimeLeaks = true;
+        } else if (token == "--baseline") {
+            auto value = takeValue(token);
+            if (!value) return value.error();
+            options.baselineFile = std::string{value.value()};
+        } else if (token == "--tolerance") {
+            auto value = takeValue(token);
+            if (!value) return value.error();
+            try {
+                options.tolerancePercent = std::stod(std::string{value.value()});
+            } catch (const std::exception&) {
+                return Error{fmt::format("--tolerance expects a percentage, got '{}'",
+                                         value.value())};
+            }
+            if (options.tolerancePercent < 0.0 || options.tolerancePercent > 100.0) {
+                return Error{fmt::format("--tolerance expects 0..100, got '{}'", value.value())};
+            }
+        } else if (token == "--fail-on") {
+            auto value = takeValue(token);
+            if (!value) return value.error();
+            if (value.value() == "any") {
+                options.gate = Options::Gate::Any;
+            } else if (value.value() == "new") {
+                options.gate = Options::Gate::New;
+            } else {
+                return Error{fmt::format("--fail-on expects 'any' or 'new', got '{}'",
+                                         value.value())};
+            }
         } else if (token == "--keep-trace") {
             options.keepTrace = true;
         } else if (token == "-o" || token == "--output") {

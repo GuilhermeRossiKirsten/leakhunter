@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# Build LeakHunter, build all five demonstrations, run each under the tool, and
+# Build LeakHunter, build all ten demonstrations, run each under the tool, and
 # leave one timestamped report per binary.
 #
 #   ./scripts/run_all_pocs.sh [output-dir]
 #
 # Default output: build/all-poc-reports/
 #
-# The five are deliberately unalike, and together they cover most of what the
-# tool has to handle -- four planted defects and one control that must come
+# The first five are deliberately unalike, and together they cover most of what
+# the tool has to handle -- four planted defects and one control that must come
 # back clean:
 #
 #   docindex     four planted defects in a realistic multi-file program
@@ -16,6 +16,16 @@
 #   pipeline23   C++23, std::expected error path
 #   pipeline98   the same program in C++98
 #   clean_app    the negative control -- modern C++, no defect, must pass
+#
+# The second five are the verification set: every leak is fixed by named
+# constants, so the expected result is arithmetic you can do on paper, and
+# docs/VALIDATION.md checks it against Valgrind and both LeakSanitizers.
+#
+#   realloc_chain    realloc -- the one call that frees and allocates at once
+#   aligned_family   aligned_alloc, posix_memalign, over-aligned operator new
+#   exception_paths  leaks on the throwing path, beside the RAII version
+#   thread_storm     8 threads, plus a producer/consumer handoff
+#   ownership_zoo    shared_ptr cycles, unique_ptr::release(), a C handle
 #
 # Each poc is configured and built **standalone**, the way you would build any
 # other project. That is part of the point: nothing here links against
@@ -89,6 +99,15 @@ build_poc poc2 service
 build_poc poc3 pipeline23
 build_poc poc4 pipeline98
 build_poc poc5 clean_app
+
+# The verification set. Unlike the five above, every leak in these is fixed by
+# named constants in the source, so the report can be checked against
+# arithmetic rather than against itself -- see docs/VALIDATION.md.
+build_poc poc6  realloc_chain
+build_poc poc7  aligned_family
+build_poc poc8  exception_paths
+build_poc poc9  thread_storm
+build_poc poc10 ownership_zoo
 
 if [[ ${#built_paths[@]} -eq 0 ]]; then
     echo "nothing was built; stopping" >&2

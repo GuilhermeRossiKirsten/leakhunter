@@ -8,6 +8,7 @@ add_executable(leakhunter_unit_tests
     unit/DiagnosticsTest.cpp
     unit/GlobTest.cpp
     unit/LeakAnalyzerTest.cpp
+    unit/BaselineTest.cpp
     unit/LeakTriageTest.cpp
     unit/MemoryTimelineTest.cpp
     unit/ReportGeneratorTest.cpp

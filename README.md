@@ -144,6 +144,38 @@ every block was released -- through the wrong door
 - **Two reports.** A self-contained HTML page (no CDN, no assets directory) and a versioned JSON
   document for tooling.
 
+## CI: gate on what got worse, not on what already existed
+
+A gate that fails on *any* leak is unusable on an existing codebase. The first run on a real project
+returns hundreds of findings, the team switches the tool off that week, and it protects nothing
+afterwards. Hold the line where it is instead:
+
+```bash
+# once, on the branch you are holding as the reference
+leakhunter --json --report-name base -o ci/ -- ./build/app
+
+# on every pull request
+leakhunter --baseline ci/base.json --fail-on new --tolerance 5 -- ./build/app
+```
+
+| Situation | Exit |
+|---|---|
+| Same findings as the baseline | `0` — **HELD** |
+| A site the baseline did not have | `1` — **REGRESSED** |
+| An existing site leaking more than the tolerance | `1` — **REGRESSED** |
+| A mismatched free the baseline did not have | `1` — undefined behaviour is never tolerated |
+| Baseline findings gone | `0` — **IMPROVED** |
+| `--baseline` path wrong, or not a report | `2` — refuses rather than treating it as empty |
+
+`--tolerance` exists because a program whose allocation count is not perfectly reproducible — a
+thread pool, a rehashing map, anything reading a clock — would otherwise fail its own gate at random,
+and a gate that fires at random is worse than no gate. It applies **only** to growth at a site that
+already existed: a brand new site is new at any tolerance, and so is a new mismatched free. Growth
+that was allowed through is listed in the report and in `baseline.withinTolerance`, so the allowance
+is never invisible.
+
+`--fail-on any` (the default) keeps the old behaviour.
+
 ## Requirements
 
 | | |

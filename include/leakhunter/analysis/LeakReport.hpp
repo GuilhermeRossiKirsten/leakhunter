@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "leakhunter/analysis/Baseline.hpp"
 #include "leakhunter/analysis/LeakTriage.hpp"
 #include "leakhunter/analysis/MemoryTimeline.hpp"
 #include "leakhunter/core/Types.hpp"
@@ -225,6 +226,9 @@ struct LeakReport {
 
     /// Where the memory went, leaked or not. Sorted by totalBytes, descending.
     std::vector<HotSpot> hotSpots;
+
+    /// What changed since a previous run, when --baseline was given.
+    BaselineDiff baseline;
 
     /// Sites whose blocks cross a thread boundary. Sorted by crossThreadFrees,
     /// descending. Built from every tracked site, not just the hot ones -- a

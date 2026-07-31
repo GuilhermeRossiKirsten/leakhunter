@@ -79,6 +79,22 @@ struct Options {
     bool strictSuppressions = false;
 
     /// Keep the intermediate binary trace instead of deleting it.
+    /// Fail the build on everything, or only on what got worse.
+    ///
+    /// `New` is what makes the tool adoptable on an existing codebase: the
+    /// first run on a real project finds hundreds of leaks, and a gate that
+    /// fails on all of them gets switched off within the week.
+    enum class Gate { Any, New };
+    Gate gate = Gate::Any;
+
+    /// A previously written report.json to compare against. Required by
+    /// Gate::New -- without it there is nothing to call "new".
+    std::filesystem::path baselineFile;
+
+    /// Growth at a known site below this percentage does not fail the build.
+    /// Zero means exact, which only suits a deterministic target.
+    double tolerancePercent = 0.0;
+
     bool keepTrace = false;
 
     /// Explicit trace path; empty means "use a temporary file".

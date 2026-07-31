@@ -6,6 +6,7 @@
 # ---------------------------------------------------------------------------
 add_library(leakhunter_core STATIC
     analysis/LeakAnalyzer.cpp
+    analysis/Baseline.cpp
     analysis/LeakTriage.cpp
     analysis/MemoryTimeline.cpp
     analysis/SuppressionSet.cpp
